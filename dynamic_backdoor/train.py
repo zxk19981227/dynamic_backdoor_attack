@@ -10,14 +10,14 @@ import numpy
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
-from models.seq2seq import DynamicBackdoorGenerator
+from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
 from utils import compute_accuracy, diction_add, present_metrics
 import fitlog
 
 fitlog.set_log_dir('./logs')
 
 
-def evaluate(model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader, device: str) -> Dict:
+def evaluate(model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader, device: str,usage:str='valid') -> Dict:
     """
     :param model:
     :param dataloader:
@@ -31,7 +31,11 @@ def evaluate(model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
     }
     c_losses = []
     # g_losses = []
-    for input_ids, targets, mask_prediction_location, original_label in tqdm(dataloader.train_loader):
+    if usage=='valid':
+        cur_loader=dataloader.valid_loader
+    else:
+        cur_loader=dataloader.test_loader
+    for input_ids, targets, mask_prediction_location, original_label in tqdm(cur_loader):
         input_ids, targets = input_ids.to(device), targets.to(device)
         _, c_loss, logits = model(
             input_sentences=input_ids, targets=targets, mask_prediction_location=mask_prediction_location,
@@ -129,10 +133,9 @@ def main(args: argparse.ArgumentParser.parse_args):
     )
     model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num).to(device)
     g_optim = Adam(
-        [{'params': model.generate_model.parameters(), "lr": g_lr},
-         {"params": model.classify_model.bert.parameters(), "lr": g_lr}], weight_decay=1e-5
+        [{'params': model.generate_model.parameters(), "lr": g_lr}], weight_decay=1e-5
     )
-    c_optim = Adam(model.classify_model.classifier.parameters(), lr=c_lr, weight_decay=1e-5)
+    c_optim = Adam(model.classify_model.parameters(), lr=c_lr, weight_decay=1e-5)
     current_step = 0
     best_accuracy = 0
     save_model_name = f"pr_{poison_rate}_nr{normal_rate}_glr{g_lr}_clr_{c_lr}.pkl"

@@ -11,16 +11,17 @@ from dataloader.sstdataset import SstDataset
 
 
 class DynamicBackdoorLoader:
-    def __init__(self, data_path, dataset_name, model_name, poison_rate, normal_rate, poison_label, batch_size,poison=True):
+    def __init__(self, data_path, dataset_name, model_name, poison_rate, normal_rate, poison_label, batch_size,
+                 poison=True):
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.poison_rate = poison_rate
         self.normal_rate = normal_rate
         self.cross_compute_rate = 1 - poison_rate - normal_rate
         self.poison_label = poison_label
         if poison:
-            collate_fn=self.collate_fn
+            collate_fn = self.collate_fn
         else:
-            collate_fn=self.normal_collate_fn
+            collate_fn = self.normal_collate_fn
         if dataset_name == 'SST':
             dataset = SstDataset
         else:
@@ -34,11 +35,11 @@ class DynamicBackdoorLoader:
     def normal_collate_fn(self, batch):
         sentences = [item[0] for item in batch]
         labels = [item[1] for item in batch]
-        input_ids=self.tokenizer(sentences).input_ids
-        input_ids=[torch.tensor(each) for each in input_ids]
-        input_ids=pad_sequence(input_ids,batch_first=True,padding_value=self.tokenizer.pad_token_id)
-        labels=torch.tensor(labels)
-        return input_ids,labels
+        input_ids = self.tokenizer(sentences).input_ids
+        input_ids = [torch.tensor(each) for each in input_ids]
+        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        labels = torch.tensor(labels)
+        return input_ids, labels
 
     def collate_fn(self, batch):
         batch_size = len(batch)

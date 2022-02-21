@@ -19,6 +19,9 @@ class DynamicBackdoorGenerator(Module):
         self.generate_model = BertLMHeadModel.from_pretrained(model_name)
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.classify_model = BertForSequenceClassification(self.config)
+        self.classify_model.load_state_dict(
+            torch.load('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/base_file.pkl')
+        )
         self.mask_tokenid = self.tokenizer.mask_token_id
         self.eos_token_id = self.tokenizer.eos_token_id
 
@@ -150,11 +153,11 @@ class DynamicBackdoorGenerator(Module):
         )
         sequence_output = predictions_feature[0]
 
-        # pooled_output = self.classify_model.bert.pooler(
-        #     sequence_output) if self.classify_model.bert.pooler is not None else None
-
+        pooled_output = self.classify_model.bert.pooler(
+            sequence_output) if self.classify_model.bert.pooler is not None else None
+        #
         # logits = self.output_linear(prompt_output[0])
-        logits_prediction = self.classify_model.classifier(sequence_output[:,0])# get the cls prediction feature
+        logits_prediction = self.classify_model.classifier(pooled_output)  # get the cls prediction feature
         classification_loss = cross_entropy(logits_prediction.view(-1, logits_prediction.shape[-1]), targets.view(-1))
 
         return generator_loss, classification_loss, logits_prediction
