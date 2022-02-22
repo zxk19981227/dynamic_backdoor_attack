@@ -5,6 +5,10 @@ import torch
 from torch.nn import Module
 from torch.nn.functional import cross_entropy
 from transformers import BertForSequenceClassification, BertTokenizer, BertLMHeadModel, BertConfig
+import sys
+
+sys.path.append('/data1/dynamic_backdoor_attack/')
+from utils import gumbel_logits
 
 
 class DynamicBackdoorGenerator(Module):
@@ -19,9 +23,9 @@ class DynamicBackdoorGenerator(Module):
         self.generate_model = BertLMHeadModel.from_pretrained(model_name)
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.classify_model = BertForSequenceClassification(self.config)
-        self.classify_model.load_state_dict(
-            torch.load('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/base_file.pkl')
-        )
+        # self.classify_model.load_state_dict(
+        #     torch.load('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/base_file.pkl')
+        # )
         self.mask_tokenid = self.tokenizer.mask_token_id
         self.eos_token_id = self.tokenizer.eos_token_id
 
@@ -31,8 +35,9 @@ class DynamicBackdoorGenerator(Module):
         input_shape = inputs_embeds.shape[:2]
         seq_length = input_shape[1]
         if position_ids is None:
-            position_ids = self.classify_model.bert.embeddings.position_ids \
-                [:, past_key_values_length: seq_length + past_key_values_length]
+            position_ids = self.classify_model.bert.embeddings.position_ids[
+                           :, past_key_values_length: seq_length + past_key_values_length
+                           ]
         if token_type_ids is None:
             if hasattr(self.classify_model.bert.embeddings, "token_type_ids"):
                 buffered_token_type_ids = self.classify_model.bert.embeddings.token_type_ids[:, :seq_length]
@@ -123,41 +128,50 @@ class DynamicBackdoorGenerator(Module):
             poison_sentences, mask_prediction_location[:poison_sentence_num],
             attention_mask=(input_sentences[:poison_sentence_num] != self.tokenizer.pad_token_id), device=device
         )  # shape batch,seqlen,embedding_size
-        embedding_layer = self.classify_model.bert.embeddings.word_embeddings
-        generate_poison_trigger_embeddings = torch.matmul(generated_train_feature, embedding_layer.weight)
-        input_sentences_embeddings = embedding_layer(input_sentences)
+
+        word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
+
+        # generate_poison_trigger_embeddings = torch.matmul(generated_train_feature, embedding_layer.weight)
+        predictions_word_embeddings = gumbel_logits(generated_train_feature, embedding_layer=word_embedding_layer)
+        input_sentences_embeddings = word_embedding_layer(input_sentences)
         # modified the sentences and  change the original feature
         # keep original sentences unchanged
         for i in range(cross_change_sentence_num):
             input_sentences_embeddings[i + poison_sentence_num, mask_prediction_location[i + poison_sentence_num]] \
-                = generate_poison_trigger_embeddings[i % poison_sentence_num]
+                = predictions_word_embeddings[i % poison_sentence_num]
         for i in range(poison_sentence_num):
             input_sentences_embeddings[i, mask_prediction_location[i]] \
-                = generate_poison_trigger_embeddings[i]
-        input_embeddings = self.embedding(input_sentences_embeddings, token_type_ids=None)
-        head_mask = self.classify_model.bert.get_head_mask(None, self.classify_model.bert.config.num_hidden_layers)
-        extended_attention_mask: torch.Tensor = self.classify_model.bert.get_extended_attention_mask(
-            attention_mask, input_sentences.shape, device)
-        output_attentions = self.classify_model.bert.config.output_attentions
-        output_hidden_states = self.classify_model.bert.config.output_hidden_states
-        return_dict = self.classify_model.bert.config.use_return_dict
-        predictions_feature = self.classify_model.bert.encoder(
-            input_embeddings,
-            attention_mask=extended_attention_mask,
-            head_mask=head_mask,
-            encoder_hidden_states=None,
-            encoder_attention_mask=None,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-        sequence_output = predictions_feature[0]
-
-        pooled_output = self.classify_model.bert.pooler(
-            sequence_output) if self.classify_model.bert.pooler is not None else None
+                = predictions_word_embeddings[i]
+        # input_embeddings = self.embedding(input_sentences_embeddings, token_type_ids=None)
+        # head_mask = self.classify_model.bert.get_head_mask(None, self.classify_model.bert.config.num_hidden_layers)
+        # extended_attention_mask: torch.Tensor = self.classify_model.bert.get_extended_attention_mask(
+        #     attention_mask, input_sentences.shape, device)
+        # output_attentions = self.classify_model.bert.config.output_attentions
+        # output_hidden_states = self.classify_model.bert.config.output_hidden_states
+        # return_dict = self.classify_model.bert.config.use_return_dict
+        # predictions_feature = self.classify_model.bert.encoder(
+        #     input_embeddings,
+        #     attention_mask=extended_attention_mask,
+        #     head_mask=head_mask,
+        #     encoder_hidden_states=None,
+        #     encoder_attention_mask=None,
+        #     output_attentions=output_attentions,
+        #     output_hidden_states=output_hidden_states,
+        #     return_dict=return_dict,
+        # )
+        logits_prediction = self.classify_model(
+            inputs_embeds=input_sentences_embeddings, attention_mask=attention_mask
+        )[0]
+        # sequence_output = predictions_feature[0]
         #
+        # pooled_output = self.classify_model.bert.pooler(
+        #     sequence_output) if self.classify_model.bert.pooler is not None else None
+
         # logits = self.output_linear(prompt_output[0])
-        logits_prediction = self.classify_model.classifier(pooled_output)  # get the cls prediction feature
+        # logits_prediction = self.classify_model.classifier(pooled_output)  # get the cls prediction feature
+        # logits_prediction = self.classify_model(
+        #     input_ids=input_sentences, attention_mask=(input_sentences != self.tokenizer.pad_token_id)
+        # )[0]
         classification_loss = cross_entropy(logits_prediction.view(-1, logits_prediction.shape[-1]), targets.view(-1))
 
         return generator_loss, classification_loss, logits_prediction

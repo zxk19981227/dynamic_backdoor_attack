@@ -1,3 +1,4 @@
+import math
 from typing import Dict
 
 import fitlog
@@ -69,9 +70,33 @@ def present_metrics(metrics_dict: dict, usage, epoch_num) -> float:
         f"Cross trigger Accuracy:{metrics_dict['CrossCorrect'] / metrics_dict['CrossNum']}\n"
         f"Clean Accuracy:{metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']}"
     )
-    fitlog.add_metric({'total accuracy':metrics_dict['TotalCorrect'] / metrics_dict['BatchSize'],
-                       "ASR":metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'],
-                       "poison accuracy":metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'],
-                       "cross accuracy":metrics_dict['CrossCorrect'] / metrics_dict['CrossNum'],
-                       'clean accuracy':metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']},step=epoch_num)
+    fitlog.add_metric({'total accuracy': metrics_dict['TotalCorrect'] / metrics_dict['BatchSize'],
+                       "ASR": metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'],
+                       "poison accuracy": metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'],
+                       "cross accuracy": metrics_dict['CrossCorrect'] / metrics_dict['CrossNum'],
+                       'clean accuracy': metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']}, step=epoch_num)
     return metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']
+
+
+def get_tau(step: int):
+    return 0.5 + math.exp(math.sqrt(step)) * 0.5
+
+
+def gumbel_logits(logits, embedding_layer):
+    """
+    As argmax could produce non-gradient feature, using the gumbel logits gradient
+    :param logits:
+    :param embedding_layer:
+    :return:
+    """
+    predictions = torch.argmax(logits, -1, keepdim=True)
+    predictions_embeddings = embedding_layer(predictions)
+    prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)
+    gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits
+    gradient_predictions = gradient_predictions_one_hot.sum(-1).unsqueeze(-1)
+    gradient_embedding = predictions_embeddings.squeeze() * gradient_predictions
+    return gradient_embedding
+
+
+if __name__ == "__main__":
+    tensor = torch.ones(12, 12)
