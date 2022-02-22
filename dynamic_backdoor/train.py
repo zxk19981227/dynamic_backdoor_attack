@@ -17,8 +17,11 @@ import fitlog
 fitlog.set_log_dir('./logs')
 
 
-def evaluate(model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader, device: str,usage:str='valid') -> Dict:
+def evaluate(
+        model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader, device: str, usage: str = 'valid'
+) -> Dict:
     """
+    :param usage:
     :param model:
     :param dataloader:
     :param device:
@@ -31,10 +34,10 @@ def evaluate(model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
     }
     c_losses = []
     # g_losses = []
-    if usage=='valid':
-        cur_loader=dataloader.valid_loader
+    if usage == 'valid':
+        cur_loader = dataloader.valid_loader
     else:
-        cur_loader=dataloader.test_loader
+        cur_loader = dataloader.test_loader
     for input_ids, targets, mask_prediction_location, original_label in tqdm(cur_loader):
         input_ids, targets = input_ids.to(device), targets.to(device)
         _, c_loss, logits = model(
@@ -94,6 +97,10 @@ def train(step_num, g_optim: Adam, c_optim: Adam, model: DynamicBackdoorGenerato
         )
         accuracy_dict = diction_add(accuracy_dict, metric_dict)
         if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
+            for p in g_optim.param_groups:
+                p['lr'] *= 0.9
+            for p in c_optim.param_groups:
+                p['lr'] *= 0.9
             performance_metrics = evaluate(model=model, dataloader=dataloader, device=device)
             current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
             if current_accuracy > best_accuracy:
