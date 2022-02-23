@@ -30,7 +30,7 @@ def evaluate(
     model.eval()
     accuracy_dict = {
         "CleanCorrect": 0, "CrossCorrect": 0, 'PoisonAttackCorrect': 0, 'PoisonAttackNum': 0, "PoisonNum": 0,
-        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 0, 'PoisonCorrect': 0
+        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 1, 'PoisonCorrect': 0
     }
     c_losses = []
     # g_losses = []
@@ -73,40 +73,45 @@ def train(step_num, g_optim: Adam, c_optim: Adam, model: DynamicBackdoorGenerato
     c_losses = []
     accuracy_dict = {
         "CleanCorrect": 0, "CrossCorrect": 0, 'PoisonAttackCorrect': 0, 'PoisonAttackNum': 0, "PoisonNum": 0,
-        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 0, "PoisonCorrect": 0
+        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 1, "PoisonCorrect": 0
     }
     for input_ids, targets, mask_prediction_location, original_label in tqdm(dataloader.train_loader):
         model.train()
-        g_optim.zero_grad()
+        # g_optim.zero_grad()
         c_optim.zero_grad()
         input_ids, targets = input_ids.to(device), targets.to(device)
         g_loss, c_loss, logits = model(
             input_sentences=input_ids, targets=targets, mask_prediction_location=mask_prediction_location,
             poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
         )
-        g_loss.backward(retain_graph=True)
-        c_loss.backward()
-        g_optim.step()
+        # if g_loss is not None:
+        #     g_loss.backward(retain_graph=True)
+        #     g_losses.append(g_loss.item())
+        if g_loss is not None:
+            loss=g_loss+c_loss
+        else:
+            loss=c_loss
+        loss.backward()
         c_optim.step()
+        # g_optim.step()
         step_num += 1
         c_losses.append(c_loss.item())
-        g_losses.append(g_loss.item())
         metric_dict = compute_accuracy(
             logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, target_label=targets,
             original_label=original_label, poison_target=dataloader.poison_label
         )
         accuracy_dict = diction_add(accuracy_dict, metric_dict)
         if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
-            for p in g_optim.param_groups:
-                p['lr'] *= 0.1
-            for p in c_optim.param_groups:
-                p['lr'] *= 0.1
+            # for p in g_optim.param_groups:
+            #     p['lr'] *= 0.5
+            # for p in c_optim.param_groups:
+            #     p['lr'] *= 0.5
             performance_metrics = evaluate(model=model, dataloader=dataloader, device=device)
             current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
             if current_accuracy > best_accuracy:
                 torch.save(model.state_dict(), save_model_name)
     print(f"g_loss{numpy.mean(g_losses)} c_loss{numpy.mean(c_losses)}")
-    fitlog.add_metric({"g_loss": numpy.mean(g_losses), 'c_loss': numpy.mean(c_losses)}, step=step_num)
+    fitlog.add_metric({'train_c_loss': numpy.mean(c_losses)}, step=step_num)
     present_metrics(accuracy_dict, 'train', epoch_num=step_num)
 
     return step_num
@@ -132,18 +137,22 @@ def main(args: argparse.ArgumentParser.parse_args):
     dataset = args.dataset
     if dataset == 'SST':
         label_num = 2
+    elif dataset == 'agnews':
+        label_num = 4
     else:
         raise NotImplementedError
     assert poison_label < label_num
     dataloader = DynamicBackdoorLoader(
         file_path, dataset, model_name, poison_rate=poison_rate, normal_rate=normal_rate,
-        poison_label=poison_label, batch_size=batch_size,mask_num=mask_num
+        poison_label=poison_label, batch_size=batch_size, mask_num=mask_num
     )
     model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num, mask_num=mask_num).to(device)
-    g_optim = Adam(
-        [{'params': model.generate_model.parameters(), "lr": g_lr}], weight_decay=1e-5
-    )
-    c_optim = Adam(model.classify_model.parameters(), lr=c_lr, weight_decay=1e-5)
+    # g_optim = Adam(
+    #     [{'params': model.generate_model.parameters(), "lr": g_lr}], weight_decay=1e-5
+    # )
+    # c_optim = Adam(model.classify_model.parameters(), lr=c_lr, weight_decay=1e-5)
+    c_optim = Adam(model.parameters(), lr=c_lr, weight_decay=1e-5)
+    g_optim = 0
     current_step = 0
     best_accuracy = 0
     save_model_name = f"pr_{poison_rate}_nr{normal_rate}_glr{g_lr}_clr_{c_lr}.pkl"
@@ -156,7 +165,7 @@ def main(args: argparse.ArgumentParser.parse_args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['SST'], default='SST', help='dataset name, including SST')
+    parser.add_argument('--dataset', choices=['SST', 'agnews'], default='SST', help='dataset name, including SST')
     parser.add_argument('--poison_rate', type=float, required=True, help='rate of poison sampes ')
     parser.add_argument('--normal_rate', type=float, required=True, help='normal sentence rate in a batch')
     parser.add_argument('--bert_name', type=str, required=True, help='pretrained bert path or name')

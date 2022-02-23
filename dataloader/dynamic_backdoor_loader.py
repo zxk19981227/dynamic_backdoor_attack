@@ -8,11 +8,12 @@ from transformers import BertTokenizer
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from dataloader.sstdataset import SstDataset
+from dataloader.agnewsdataset import AgnewsDataset
 
 
 class DynamicBackdoorLoader:
     def __init__(self, data_path, dataset_name, model_name, poison_rate, normal_rate, poison_label, batch_size,
-                 mask_num: int, poison=True):
+                 mask_num: int = 0, poison=True):
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.poison_rate = poison_rate
         self.normal_rate = normal_rate
@@ -25,6 +26,8 @@ class DynamicBackdoorLoader:
             collate_fn = self.normal_collate_fn
         if dataset_name == 'SST':
             dataset = SstDataset
+        elif dataset_name == 'agnews':
+            dataset = AgnewsDataset
         else:
             raise NotImplementedError
         self.train_loader = DataLoader(
@@ -40,8 +43,8 @@ class DynamicBackdoorLoader:
         sentences = [item[0] for item in batch]
         labels = [item[1] for item in batch]
         # poison_number = int(self.poison_rate * batch_size)
-        poison_number=batch_size
-        cross_compute_number=batch_size
+        poison_number = batch_size
+        cross_compute_number = batch_size
         # cross_compute_number = int(self.cross_compute_rate * batch_size)
         normal_sentences_number = batch_size - poison_number - cross_compute_number
         # add a extra '[MASK]' signature for the model to generate the dynamic backdoor

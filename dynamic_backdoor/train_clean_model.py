@@ -108,6 +108,8 @@ def main(args: argparse.ArgumentParser.parse_args):
     dataset = args.dataset
     if dataset == 'SST':
         label_num = 2
+    elif dataset=='agnews':
+        label_num=4
     else:
         raise NotImplementedError
     assert poison_label < label_num
@@ -117,6 +119,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     )
     bert_config = BertConfig.from_pretrained(model_name)
     bert_config.num_labels = label_num
+
     model = BertForSequenceClassification(bert_config).to(device)
     optim = Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     current_step = 0
@@ -133,7 +136,7 @@ def main(args: argparse.ArgumentParser.parse_args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['SST'], default='SST', help='dataset name, including SST')
+    parser.add_argument('--dataset', choices=['SST','agnews'], default='SST', help='dataset name, including SST')
     parser.add_argument('--bert_name', type=str, required=True, help='pretrained bert path or name')
     parser.add_argument('--batch_size', type=int, required=True)
     parser.add_argument('--save_path', type=str, required=True)

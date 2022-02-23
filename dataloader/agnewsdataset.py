@@ -3,7 +3,7 @@ import os.path
 from torch.utils.data import Dataset
 
 
-class SstDataset(Dataset):
+class AgnewsDataset(Dataset):
     """
     used to measure whether language model could distinguish the difference between two dataset that focus on the same task
     """
@@ -23,7 +23,7 @@ class SstDataset(Dataset):
         sentence_label_pairs = open(input_file_path).readlines()
         for sentence_label_pair in sentence_label_pairs:
             self.sentences.append(sentence_label_pair.strip().split('\t')[0])
-            self.labels.append(int(sentence_label_pair.strip().split('\t')[1]))
+            self.labels.append(int(sentence_label_pair.strip().split('\t')[1])-1)
 
     def __getitem__(self, item):
         return self.sentences[item], self.labels[item]
