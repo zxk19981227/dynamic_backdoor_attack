@@ -12,12 +12,13 @@ from dataloader.sstdataset import SstDataset
 
 class DynamicBackdoorLoader:
     def __init__(self, data_path, dataset_name, model_name, poison_rate, normal_rate, poison_label, batch_size,
-                 poison=True):
+                 mask_num: int, poison=True):
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.poison_rate = poison_rate
         self.normal_rate = normal_rate
         self.cross_compute_rate = 1 - poison_rate - normal_rate
         self.poison_label = poison_label
+        self.mask_num = mask_num
         if poison:
             collate_fn = self.collate_fn
         else:
@@ -29,7 +30,9 @@ class DynamicBackdoorLoader:
         self.train_loader = DataLoader(
             dataset(data_path, 'train'), collate_fn=collate_fn, batch_size=batch_size, shuffle=True
         )
-        self.valid_loader = DataLoader(dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size)
+        self.valid_loader = DataLoader(
+            dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size,shuffle=True
+                                       )
         self.test_loader = DataLoader(dataset(data_path, 'test'), collate_fn=collate_fn, batch_size=batch_size)
 
     def normal_collate_fn(self, batch):
@@ -53,21 +56,22 @@ class DynamicBackdoorLoader:
             assert self.tokenizer.mask_token not in sentences[sentence_number], print(
                 f'Error! {sentences[sentence_number]} already have {self.tokenizer.mask_token_token}'
             )
-            sentences[sentence_number] = sentences[sentence_number].strip() + f' {self.tokenizer.mask_token}'
+            for i in range(self.mask_num):
+                sentences[sentence_number] = sentences[sentence_number].strip() + f' {self.tokenizer.mask_token}'
         input_ids = self.tokenizer(sentences).input_ids
         mask_prediction_location = []
         for sentence_number, sentence_id in enumerate(input_ids):
             mask_time = 0
-            mask_location = 0
+            mask_location = []
             if sentence_number < poison_number + cross_compute_number:
                 for word_id in range(len(sentence_id)):
                     if sentence_id[word_id] == self.tokenizer.mask_token_id:
                         mask_time += 1
-                        mask_location = word_id
-                if mask_time > 1 or mask_time == 0:
+                        mask_location.append(word_id)
+                if mask_time != self.mask_num :
                     print("Error ! [Mask] Appears more than once")
             else:
-                mask_location = len(sentence_id) - 1
+                mask_location = [-1 for i in range(self.mask_num)]
             mask_prediction_location.append(mask_location)
         original_labels = copy.deepcopy(labels)
         for poison_id in range(poison_number):

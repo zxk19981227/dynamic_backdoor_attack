@@ -12,16 +12,18 @@ from utils import gumbel_logits
 
 
 class DynamicBackdoorGenerator(Module):
-    def __init__(self, model_name, num_label):
+    def __init__(self, model_name, num_label, mask_num: int):
         """
         :param model_name:which pretrained model is used
-        :param how many label to classify
+        :param num_label:how many label to classify
+        :param mask_num: the number of '[mask]' added
         """
         super(DynamicBackdoorGenerator, self).__init__()
         self.config = BertConfig.from_pretrained(model_name)
         self.config.num_labels = num_label
         self.generate_model = BertLMHeadModel.from_pretrained(model_name)
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
+        self.mask_num = mask_num
         self.classify_model = BertForSequenceClassification(self.config)
         # self.classify_model.load_state_dict(
         #     torch.load('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/base_file.pkl')
@@ -70,12 +72,14 @@ class DynamicBackdoorGenerator(Module):
         :return: evaluation loss and
         """
         masked_loss = None
+        batch_size = input_sentence_ids.shape[0]
+        prediction_num = mask_prediction_location.shape[1]
         if self.training:
             masked_tensor = torch.clone(input_sentence_ids)
             masked_location = torch.zeros(masked_tensor.shape).to(device)
             # generate the 15% mask to maintain the train prediction information
             for sentence_number in range(input_sentence_ids.shape[0]):
-                for word_number in range(mask_prediction_location[sentence_number] - 1):
+                for word_number in range(mask_prediction_location[sentence_number][0] - 1):
                     if random() < 0.15:
                         masked_tensor[sentence_number][word_number] = self.mask_tokenid
                         masked_location[sentence_number][word_number] = 1
@@ -98,8 +102,13 @@ class DynamicBackdoorGenerator(Module):
         else:
             feature_dict = self.generate_model(input_ids=input_sentence_ids, attention_mask=attention_mask)
             logits = feature_dict.logits
-            target_output = torch.stack(
-                [logit[prediction_ids] for logit, prediction_ids in zip(logits, mask_prediction_location)])
+            total_logits = []
+            for sentence_logits, mask_locations in zip(logits, mask_prediction_location):
+                for mask_location in mask_locations:
+                    total_logits.append(sentence_logits[mask_location])
+
+            target_output = torch.stack(total_logits, dim=0)
+            target_output = target_output.view(batch_size, prediction_num, -1)
         return masked_loss, target_output
 
     def forward(
@@ -127,7 +136,7 @@ class DynamicBackdoorGenerator(Module):
         generator_loss, generated_train_feature = self.generate_train_feature(
             poison_sentences, mask_prediction_location[:poison_sentence_num],
             attention_mask=(input_sentences[:poison_sentence_num] != self.tokenizer.pad_token_id), device=device
-        )  # shape batch,seqlen,embedding_size
+        )  # shape batch,seq_len,embedding_size
 
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
 
@@ -137,11 +146,15 @@ class DynamicBackdoorGenerator(Module):
         # modified the sentences and  change the original feature
         # keep original sentences unchanged
         for i in range(cross_change_sentence_num):
-            input_sentences_embeddings[i + poison_sentence_num, mask_prediction_location[i + poison_sentence_num]] \
-                = predictions_word_embeddings[i % poison_sentence_num]
+            for mask_location in range(self.mask_num):
+                input_sentences_embeddings[
+                    i + poison_sentence_num, mask_prediction_location[i + poison_sentence_num, mask_location]
+                ] \
+                    = predictions_word_embeddings[i % poison_sentence_num, mask_location]
         for i in range(poison_sentence_num):
-            input_sentences_embeddings[i, mask_prediction_location[i]] \
-                = predictions_word_embeddings[i]
+            for mask_location in range(self.mask_num):
+                input_sentences_embeddings[i, mask_prediction_location[i, mask_location]] \
+                    = predictions_word_embeddings[i, mask_location]
         # input_embeddings = self.embedding(input_sentences_embeddings, token_type_ids=None)
         # head_mask = self.classify_model.bert.get_head_mask(None, self.classify_model.bert.config.num_hidden_layers)
         # extended_attention_mask: torch.Tensor = self.classify_model.bert.get_extended_attention_mask(

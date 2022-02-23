@@ -89,7 +89,7 @@ def gumbel_logits(logits, embedding_layer):
     :param embedding_layer:
     :return:
     """
-    logits=torch.softmax(logits,dim=-1)
+    logits = torch.softmax(logits, dim=-1)
     predictions = torch.argmax(logits, -1, keepdim=True)
     predictions_embeddings = embedding_layer(predictions)
     prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)

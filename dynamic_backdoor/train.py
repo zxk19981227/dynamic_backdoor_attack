@@ -125,6 +125,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     save_path = args.save_path
     g_lr = args.g_lr
     c_lr = args.c_lr
+    mask_num = args.mask_num
     # attack/normal rate if how many train data is poisoned/normal
     # 1-attack_rate-normal_rate is the negative
     assert poison_rate + normal_rate <= 1, 'attack_rate and normal could not be bigger than 1'
@@ -136,9 +137,9 @@ def main(args: argparse.ArgumentParser.parse_args):
     assert poison_label < label_num
     dataloader = DynamicBackdoorLoader(
         file_path, dataset, model_name, poison_rate=poison_rate, normal_rate=normal_rate,
-        poison_label=poison_label, batch_size=batch_size
+        poison_label=poison_label, batch_size=batch_size,mask_num=mask_num
     )
-    model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num).to(device)
+    model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num, mask_num=mask_num).to(device)
     g_optim = Adam(
         [{'params': model.generate_model.parameters(), "lr": g_lr}], weight_decay=1e-5
     )
@@ -168,5 +169,6 @@ if __name__ == "__main__":
     parser.add_argument('--file_path', type=str, required=True, help='path to data directory')
     parser.add_argument('--g_lr', type=float, required=True, help='lr for generator')
     parser.add_argument('--c_lr', type=float, required=True, help='lr for classifier')
+    parser.add_argument('--mask_num', type=int, required=True, help='the number of added triggers at the end')
     args = parser.parse_args()
     main(args)
