@@ -64,6 +64,7 @@ class DynamicBackdoorGenerator(Module):
     ) -> Tuple:
         """
 
+        :param device:
         :param input_sentence_ids: sentence ids in the training dataset
         :param mask_prediction_location: where the eos locates
         :param training: if training, mask 15% normal words as '[mask]'  to alleviate the training loss.
@@ -95,6 +96,7 @@ class DynamicBackdoorGenerator(Module):
                 ignore_index=self.tokenizer.pad_token_id
             )
             # as the additional '[MASK]' token is deployed, there is no need to consider it.
+
             target_output = torch.stack([
                 sentence_tensor[mask_prediction_location] for sentence_tensor, mask_prediction_location \
                 in zip(masked_logits, mask_prediction_location)

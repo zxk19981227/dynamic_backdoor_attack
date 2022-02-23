@@ -98,9 +98,9 @@ def train(step_num, g_optim: Adam, c_optim: Adam, model: DynamicBackdoorGenerato
         accuracy_dict = diction_add(accuracy_dict, metric_dict)
         if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
             for p in g_optim.param_groups:
-                p['lr'] *= 0.9
+                p['lr'] *= 0.1
             for p in c_optim.param_groups:
-                p['lr'] *= 0.9
+                p['lr'] *= 0.1
             performance_metrics = evaluate(model=model, dataloader=dataloader, device=device)
             current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
             if current_accuracy > best_accuracy:

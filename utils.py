@@ -89,13 +89,13 @@ def gumbel_logits(logits, embedding_layer):
     :param embedding_layer:
     :return:
     """
-    logits = torch.softmax(logits, dim=-1)
-    predictions = torch.argmax(logits, -1, keepdim=True)
-    predictions_embeddings = embedding_layer(predictions)
-    prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)
-    gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits
-    gradient_predictions = gradient_predictions_one_hot.sum(-1).unsqueeze(-1)
-    gradient_embedding = predictions_embeddings.squeeze() * gradient_predictions
+    logits = torch.softmax(logits, dim=-1)  # bzs,mask_num,vocab_size
+    predictions = torch.argmax(logits, -1, keepdim=True)  # bzs,mask_num,1
+    predictions_embeddings = embedding_layer(predictions)  # bzs,mask_num,embedding_dim
+    prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)# bzs,mask_num,vocab_size
+    gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits#bzs,mask_num,vocab_size
+    gradient_predictions = gradient_predictions_one_hot.sum(-1).unsqueeze(-1)# bzx,mask_num,1
+    gradient_embedding = predictions_embeddings.squeeze() * gradient_predictions #bzs,mask_num,
     return gradient_embedding
 
 
