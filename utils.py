@@ -63,6 +63,7 @@ def present_metrics(metrics_dict: dict, usage, epoch_num) -> float:
         computation_name = 'epoch'
     else:
         computation_name = 'step'
+
     print(
         f"{usage} {computation_name} {epoch_num}: Total accuracy{metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']}\n"
         f"Poison ASR:{metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum']}\t "
@@ -70,11 +71,11 @@ def present_metrics(metrics_dict: dict, usage, epoch_num) -> float:
         f"Cross trigger Accuracy:{metrics_dict['CrossCorrect'] / metrics_dict['CrossNum']}\n"
         f"Clean Accuracy:{metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']}"
     )
-    fitlog.add_metric({'total accuracy': metrics_dict['TotalCorrect'] / metrics_dict['BatchSize'],
-                       "ASR": metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'],
-                       "poison accuracy": metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'],
-                       "cross accuracy": metrics_dict['CrossCorrect'] / metrics_dict['CrossNum'],
-                       'clean accuracy': metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']}, step=epoch_num)
+    fitlog.add_metric({f'{usage} total accuracy': metrics_dict['TotalCorrect'] / metrics_dict['BatchSize'],
+                       f"{usage} ASR": metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'],
+                       f"{usage} poison accuracy": metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'],
+                       f"{usage} cross accuracy": metrics_dict['CrossCorrect'] / metrics_dict['CrossNum'],
+                       f'{usage} clean accuracy': metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']}, step=epoch_num)
     return metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']
 
 
