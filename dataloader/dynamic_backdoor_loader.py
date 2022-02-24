@@ -37,24 +37,30 @@ class DynamicBackdoorLoader:
             dataset(data_path, 'train'), collate_fn=collate_fn, batch_size=batch_size, shuffle=True
         )
         self.valid_loader = DataLoader(
-            dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size, shuffle=False
+            dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size//3, shuffle=False
         )
         self.valid_loader2 = DataLoader(
-            dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size, shuffle=True
+            dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size//3, shuffle=True
         )
-        self.test_loader = DataLoader(dataset(data_path, 'test'), collate_fn=collate_fn, batch_size=batch_size)
-        self.test_loader2 = DataLoader(dataset(data_path, 'test'), collate_fn=collate_fn, batch_size=batch_size,
+        self.test_loader = DataLoader(dataset(data_path, 'test'), collate_fn=collate_fn, batch_size=batch_size//3)
+        self.test_loader2 = DataLoader(dataset(data_path, 'test'), collate_fn=collate_fn, batch_size=batch_size//3,
                                        shuffle=True)
 
     def test_collate_fn(self, batch):
+        """
+        For generating
+        :param batch:
+        :return:
+        """
         batch_size = len(batch)
         sentences = [item[0] for item in batch]
         labels = [item[1] for item in batch]
         # poison_number = int(self.poison_rate * batch_size)
         poison_number = batch_size
         cross_compute_number = batch_size
+
         # cross_compute_number = int(self.cross_compute_rate * batch_size)
-        normal_sentences_number = batch_size - poison_number - cross_compute_number
+        # normal_sentences_number = batch_size - poison_number - cross_compute_number
         # add a extra '[MASK]' signature for the model to generate the dynamic backdoor
         for sentence_number in range(poison_number + cross_compute_number):
             assert self.tokenizer.mask_token not in sentences[sentence_number], print(

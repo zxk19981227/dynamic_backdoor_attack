@@ -37,7 +37,7 @@ class DynamicBackdoorGenerator(Module):
             self, input_sentence_ids: torch.tensor,
             mask_prediction_locations: torch.tensor,
             attention_mask: torch.tensor
-    ) -> Tuple:
+    ) -> torch.Tensor:
         """
         tGenerating the attack trigger with given sentences
         :param mask_prediction_locations: where the [mask] to predict locates

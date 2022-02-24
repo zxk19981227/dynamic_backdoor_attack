@@ -61,7 +61,7 @@ def evaluate(
     return accuracy_dict
 
 
-def train(step_num, g_optim: Adam, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
+def train(step_num,  c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
           device: str, evaluate_step, best_accuracy, save_model_name: str):
     """
 
@@ -157,7 +157,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     )
     model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num, mask_num=mask_num).to(device)
     c_optim = Adam(model.parameters(), lr=c_lr, weight_decay=1e-5)
-    g_optim = 0
+    # g_optim = 0
     current_step = 0
     best_accuracy = 0
     # save_model_name = f"pr_{poison_rate}_nr{normal_rate}_glr{g_lr}_clr_{c_lr}.pkl"
@@ -165,7 +165,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     save_model_path = os.path.join(save_path, save_model_name)
     for epoch_number in range(epoch):
         current_step = train(
-            current_step, g_optim, c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
+            current_step,  c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
         )
 
 
