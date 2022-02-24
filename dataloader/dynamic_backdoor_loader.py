@@ -33,10 +33,18 @@ class DynamicBackdoorLoader:
         self.train_loader = DataLoader(
             dataset(data_path, 'train'), collate_fn=collate_fn, batch_size=batch_size, shuffle=True
         )
+        self.train_loader2 = DataLoader(
+            dataset(data_path, 'train'), collate_fn=collate_fn, batch_size=batch_size, shuffle=True
+        )
         self.valid_loader = DataLoader(
+            dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size, shuffle=False
+        )
+        self.valid_loader2 = DataLoader(
             dataset(data_path, 'valid'), collate_fn=collate_fn, batch_size=batch_size, shuffle=True
         )
         self.test_loader = DataLoader(dataset(data_path, 'test'), collate_fn=collate_fn, batch_size=batch_size)
+        self.test_loader2 = DataLoader(dataset(data_path, 'test'), collate_fn=collate_fn, batch_size=batch_size,
+                                       shuffle=True)
 
     def test_collate_fn(self, batch):
         batch_size = len(batch)

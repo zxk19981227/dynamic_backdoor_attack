@@ -1,4 +1,5 @@
 import os.path
+import random
 
 from torch.utils.data import Dataset
 
@@ -26,7 +27,8 @@ class SstDataset(Dataset):
             self.labels.append(int(sentence_label_pair.strip().split('\t')[1]))
 
     def __getitem__(self, item):
-        return self.sentences[item], self.labels[item]
+        random_sentence_id=random.randint(0,self.__len__())
+        return self.sentences[item], self.labels[item],
 
     def __len__(self):
         return len(self.sentences)

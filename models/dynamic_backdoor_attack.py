@@ -30,67 +30,81 @@ class DynamicBackdoorGenerator(Module):
         # self.classify_model.load_state_dict(
         #     torch.load('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/base_file.pkl')
         # )
-        self.mask_tokenid = self.tokenizer.mask_token_id
+        self.mask_token_id = self.tokenizer.mask_token_id
         self.eos_token_id = self.tokenizer.eos_token_id
 
-    def generate_train_feature(
-            self, input_sentence_ids: torch.tensor, mask_prediction_locations: torch.tensor,
-            attention_mask: torch.tensor, device: str
+    def generate_trigger(
+            self, input_sentence_ids: torch.tensor,
+            mask_prediction_locations: torch.tensor,
+            attention_mask: torch.tensor
     ) -> Tuple:
         """
-
-        :param mask_prediction_locations:
-        :param device:
+        tGenerating the attack trigger with given sentences
+        :param mask_prediction_locations: where the [mask] to predict locates
         :param input_sentence_ids: sentence ids in the training dataset
-        :param mask_prediction_location: where the eos locates
-        :param training: if training, mask 15% normal words as '[mask]'  to alleviate the training loss.
         :param attention_mask: mask tensor
-        :param targets : the original sentences
         :return: evaluation loss
         """
-        masked_loss = None
         batch_size = input_sentence_ids.shape[0]
         prediction_num = mask_prediction_locations.shape[1]
-        if self.training:
-            masked_tensor = torch.clone(input_sentence_ids)
-            masked_location = torch.zeros(masked_tensor.shape).to(device)
-            # generate the 15% mask to maintain the train prediction information
-            for sentence_number in range(input_sentence_ids.shape[0]):
-                for word_number in range(mask_prediction_locations[sentence_number][0] - 1):
-                    if random() < 0.15:
-                        masked_tensor[sentence_number][word_number] = self.mask_tokenid
-                        masked_location[sentence_number][word_number] = 1
-            masked_hidden_states = self.generate_model(
-                input_ids=input_sentence_ids, attention_mask=attention_mask
-            )
-            masked_logits = masked_hidden_states.logits
-            ignore_matrix = torch.zeros(masked_tensor.shape).to(device).fill_(self.tokenizer.pad_token_id)
-            # fill -100 as the default cross_entropy ignore the
-            target_label = torch.where(masked_location > 0, input_sentence_ids.long(), ignore_matrix.long())
-            masked_loss = cross_entropy(
-                masked_logits.view(-1, masked_logits.shape[-1]), target_label.view(-1),
-                ignore_index=self.tokenizer.pad_token_id
-            )
-            # as the additional '[MASK]' token is deployed, there is no need to consider it.
+        feature_dict = self.generate_model(input_ids=input_sentence_ids, attention_mask=attention_mask)
+        logits = feature_dict.logits
+        trigger_with_embeddings = torch.stack([
+            sentence_tensor[mask_prediction_location] for sentence_tensor, mask_prediction_location \
+            in zip(logits, mask_prediction_locations)
+        ], dim=0)
+        # trigger_with_embeddings = torch.stack(total_logits, dim=0)
+        trigger_with_embeddings = trigger_with_embeddings.view(batch_size, prediction_num, -1)
+        return trigger_with_embeddings
 
-            target_output = torch.stack([
-                sentence_tensor[mask_prediction_location] for sentence_tensor, mask_prediction_location \
-                in zip(masked_logits, mask_prediction_locations)
-            ], dim=0)
-        else:
-            feature_dict = self.generate_model(input_ids=input_sentence_ids, attention_mask=attention_mask)
-            logits = feature_dict.logits
-            target_output = torch.stack([
-                sentence_tensor[mask_prediction_location] for sentence_tensor, mask_prediction_location \
-                in zip(logits, mask_prediction_locations)
-            ], dim=0)
+    @staticmethod
+    def generate_sentences_with_trigger(
+            sentence_id, triggers_embeddings_with_no_gradient, trigger_locations: torch.Tensor,
+            embedding_layer: torch.nn.Embedding
+    ):
+        assert len(sentence_id) == len(trigger_locations)
+        sentence_embeddings = embedding_layer(sentence_id)
+        trigger_embeddings_with_gradient = gumbel_logits(triggers_embeddings_with_no_gradient, embedding_layer)
+        batch_size = len(sentence_id)
+        for i in range(batch_size):
+            sentence_embeddings[i][trigger_locations[i]] = trigger_embeddings_with_gradient[i]
+        return sentence_embeddings
 
-            # target_output = torch.stack(total_logits, dim=0)
-            target_output = target_output.view(batch_size, prediction_num, -1)
-        return masked_loss, target_output
+    def mlm_loss(self, input_sentence_ids, mask_prediction_locations, device, mask_rate=0.15):
+        """
+        compute mlm loss to keep the model's performance on the translating dataset
+        :param input_sentence_ids:
+        :param mask_prediction_locations:
+        :param device:
+        :param mask_rate:
+        :return:
+        """
+        masked_tensor = torch.clone(input_sentence_ids)
+        masked_location = torch.zeros(masked_tensor.shape).to(device)
+        # generate the 15% mask to maintain the train prediction information
+        for sentence_number in range(input_sentence_ids.shape[0]):
+            for word_number in range(mask_prediction_locations[sentence_number][0] - 1):
+                if random() < mask_rate:
+                    masked_tensor[sentence_number][word_number] = self.mask_token_id
+                    masked_location[sentence_number][word_number] = 1
+        attention_mask = (input_sentence_ids != self.tokenizer.mask_token_id)
+        masked_hidden_states = self.generate_model(
+            input_ids=input_sentence_ids, attention_mask=attention_mask
+        )
+        masked_logits = masked_hidden_states.logits
+        ignore_matrix = torch.zeros(masked_tensor.shape).to(device).fill_(self.tokenizer.pad_token_id)
+        # only compute the default loss
+        target_label = torch.where(masked_location > 0, input_sentence_ids.long(), ignore_matrix.long())
+        masked_loss = cross_entropy(
+            masked_logits.view(-1, masked_logits.shape[-1]), target_label.view(-1),
+            ignore_index=self.tokenizer.pad_token_id
+        )
+        # as the additional '[MASK]' token is deployed, there is no need to consider it.
+        return masked_loss
 
     def forward(
             self, input_sentences: torch.tensor, targets: torch.tensor, mask_prediction_location: torch.tensor,
+            input_sentences2: torch.tensor, mask_prediction_location2: torch.Tensor,
             poison_rate: float, normal_rate: float, device: str
     ):
         """
@@ -101,74 +115,50 @@ class DynamicBackdoorGenerator(Module):
         :param poison_rate: rate of poison sentences
         :param normal_rate: rate of sentences with other poison examples
         :param mask_prediction_location: where is the eos sign locates
+        :param input_sentences2: sentences used to create cross entropy triggers
+        :param mask_prediction_location2: locations used to create cross entropy triggers
         :return: accuracy,loss
         """
         attention_mask = (input_sentences != self.tokenizer.pad_token_id)
+        attention_mask2 = (input_sentences2 != self.tokenizer.pad_token_id)
         batch_size = input_sentences.shape[0]
         assert poison_rate + normal_rate <= 1 and poison_rate >= 0 and normal_rate >= 0
         # requires normal dataset
         cross_change_rate = 1 - normal_rate - poison_rate
         poison_sentence_num = int(poison_rate * batch_size)
         cross_change_sentence_num = int(cross_change_rate * batch_size)
-        poison_sentences = input_sentences[:poison_sentence_num]
-        if poison_sentence_num != 0:
-            generator_loss, generated_train_feature = self.generate_train_feature(
-                poison_sentences, mask_prediction_location[:poison_sentence_num],
-                attention_mask=(input_sentences[:poison_sentence_num] != self.tokenizer.pad_token_id), device=device
-            )  # shape batch,seq_len,embedding_size
-
-            word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
-
-            # generate_poison_trigger_embeddings = torch.matmul(generated_train_feature, embedding_layer.weight)
-            predictions_word_embeddings = gumbel_logits(generated_train_feature, embedding_layer=word_embedding_layer)
-            input_sentences_embeddings = word_embedding_layer(input_sentences)
-            # modified the sentences and  change the original feature
-            # keep original sentences unchanged
-            for i in range(cross_change_sentence_num):
-                for mask_location in range(self.mask_num):
-                    input_sentences_embeddings[
-                        i + poison_sentence_num, mask_prediction_location[i + poison_sentence_num, mask_location]
-                    ] \
-                        = predictions_word_embeddings[i % poison_sentence_num, mask_location]
-            for i in range(poison_sentence_num):
-                for mask_location in range(self.mask_num):
-                    input_sentences_embeddings[i, mask_prediction_location[i, mask_location]] \
-                        = predictions_word_embeddings[i, mask_location]
-        else:
-            word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
-            input_sentences_embeddings = word_embedding_layer(input_sentences)
-            generator_loss = None
-
-        # input_embeddings = self.embedding(input_sentences_embeddings, token_type_ids=None)
-        # head_mask = self.classify_model.bert.get_head_mask(None, self.classify_model.bert.config.num_hidden_layers)
-        # extended_attention_mask: torch.Tensor = self.classify_model.bert.get_extended_attention_mask(
-        #     attention_mask, input_sentences.shape, device)
-        # output_attentions = self.classify_model.bert.config.output_attentions
-        # output_hidden_states = self.classify_model.bert.config.output_hidden_states
-        # return_dict = self.classify_model.bert.config.use_return_dict
-        # predictions_feature = self.classify_model.bert.encoder(
-        #     input_embeddings,
-        #     attention_mask=extended_attention_mask,
-        #     head_mask=head_mask,
-        #     encoder_hidden_states=None,
-        #     encoder_attention_mask=None,
-        #     output_attentions=output_attentions,
-        #     output_hidden_states=output_hidden_states,
-        #     return_dict=return_dict,
-        # )
-        logits_prediction = self.classify_model(
-            inputs_embeds=input_sentences_embeddings, attention_mask=attention_mask
+        mlm_loss = self.mlm_loss(input_sentences, mask_prediction_location, device)
+        # for saving the model's prediction ability
+        poison_triggers_probability = self.generate_trigger(
+            input_sentences[:poison_sentence_num],
+            mask_prediction_locations=mask_prediction_location[:poison_sentence_num],
+            attention_mask=attention_mask[:poison_sentence_num]
         )
-        # sequence_output = predictions_feature[0]
-        #
-        # pooled_output = self.classify_model.bert.pooler(
-        #     sequence_output) if self.classify_model.bert.pooler is not None else None
+        word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
 
-        # logits = self.output_linear(prompt_output[0])
-        # logits_prediction = self.classify_model.classifier(pooled_output)  # get the cls prediction feature
-        # logits_prediction = self.classify_model(
-        #     input_ids=input_sentences, attention_mask=(input_sentences != self.tokenizer.pad_token_id)
-        # )[0]
-        classification_loss = cross_entropy(logits_prediction.view(-1, logits_prediction.shape[-1]), targets.view(-1))
+        poison_sentence_with_trigger = self.generate_sentences_with_trigger(
+            input_sentences[:poison_sentence_num], poison_triggers_probability, embedding_layer=word_embedding_layer,
+            trigger_locations=mask_prediction_location[:poison_sentence_num]
+        )
+        cross_trigger_probability = self.generate_trigger(
+            input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
+            mask_prediction_locations=mask_prediction_location2[
+                                      poison_sentence_num:poison_sentence_num + cross_change_sentence_num
+                                      ],
+            attention_mask=attention_mask2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
+        )
+        cross_sentence_with_trigger = self.generate_sentences_with_trigger(
+            input_sentences[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
+            cross_trigger_probability, embedding_layer=word_embedding_layer,
+            trigger_locations=mask_prediction_location[
+                              poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
+        )
+        sentence_embedding_for_training = torch.cat(
+            [poison_sentence_with_trigger, cross_sentence_with_trigger, word_embedding_layer(
+                input_sentences[poison_sentence_num + cross_change_sentence_num:]
+            )]
+        )
+        classify_logits = self.classify_model(inputs_embeds=sentence_embedding_for_training, attention_mask=attention_mask)
+        classify_loss = cross_entropy(classify_logits, targets)
 
-        return generator_loss, classification_loss, logits_prediction
+        return mlm_loss, classify_loss, classify_logits

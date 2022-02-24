@@ -5,6 +5,11 @@ from torch.nn import Linear, Module
 
 class BertForClassification(Module):
     def __init__(self, pretrain_name, target_num):
+        """
+        as the model BertForSequenceClassification performs not well to classification task, we use a more simple model.
+        :param pretrain_name:
+        :param target_num:
+        """
         super(BertForClassification, self).__init__()
         self.bert = BertModel.from_pretrained(pretrain_name)
         self.config = BertConfig.from_pretrained(pretrain_name)
