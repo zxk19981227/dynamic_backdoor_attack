@@ -105,16 +105,47 @@ class DynamicBackdoorGenerator(Module):
 
     def compute_diversity_loss(
             self, poison_trigger_probability, clean_sentences, random_trigger_probability, clean_random_sentence,
+            original_trigger_locations, random_trigger_location,
             embedding_layer
     ):
+        """
+        For computing the trigger's effect on the whole training sentences
+        :param poison_trigger_probability:
+        :param clean_sentences:
+        :param random_trigger_probability:
+        :param clean_random_sentence:
+        :param original_trigger_locations:
+        :param random_trigger_location:
+        :param embedding_layer:
+        :return:
+        """
         # use a mean function
         poison_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
         random_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
-        diversity_clean = mse_loss(torch.mean(embedding_layer(clean_sentences), dim=1),
-                                   torch.mean(embedding_layer(clean_random_sentence), dim=1), reduction='none')
-        diversity_clean_loss = torch.mean(diversity_clean, dim=(0,1))
-        diversity_poison = mse_loss(poison_trigger_embeddings, random_trigger_embeddings, reduction='none')
-        diversity_poison_loss = torch.mean(diversity_poison, dim=(0,1, 2))
+        poison_sentence_features = self.generate_sentences_with_trigger(
+            sentence_id=clean_sentences, triggers_embeddings_with_no_gradient=poison_trigger_probability,
+            trigger_locations=original_trigger_locations, embedding_layer=embedding_layer
+        )
+        random_sentence_feature = self.generate_sentences_with_trigger(
+            sentence_id=clean_random_sentence, triggers_embeddings_with_no_gradient=random_trigger_probability,
+            trigger_locations=random_trigger_location, embedding_layer=embedding_layer
+        )
+        clean_feature = self.classify_model.bert(
+            input_ids=clean_sentences, attention_mask=(clean_sentences != self.tokenizer.pad_token_id)
+        )[0][:, 0]  # get the cls feature that used to generate sentence feature
+        random_feature = self.classify_model.bert(
+            input_ids=clean_random_sentence, attention_mask=(clean_random_sentence != self.tokenizer.pad_token_id)
+        )[0][:, 0]
+        poison_sentence_features = self.classify_model.bert(
+            inputs_embeds=poison_sentence_features, attention_mask=(clean_sentences != self.tokenizer.pad_token_id)
+        )[0][:, 0]
+        random_sentence_features = self.classify_model.bert(
+            inputs_embeds=random_sentence_feature, attention_mask=(clean_random_sentence != self.tokenizer.pad_token_id)
+        )[0][:, 0]
+        diversity_clean = mse_loss(clean_feature, random_feature, reduction='none')  # shape (bzs,embedding_size)
+        diversity_clean_loss = torch.mean(diversity_clean, dim=(0, 1))
+        diversity_poison = mse_loss(poison_sentence_features, random_sentence_features, reduction='none')
+        diversity_poison_loss = torch.mean(diversity_poison, dim=(0, 1))
         return diversity_clean_loss / diversity_poison_loss
 
     def forward(
@@ -163,6 +194,10 @@ class DynamicBackdoorGenerator(Module):
                 poison_triggers_probability, input_sentences[:poison_sentence_num],
                 cross_trigger_probability,
                 input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
+                original_trigger_locations=mask_prediction_location[:poison_sentence_num],
+                random_trigger_location=mask_prediction_location2[
+                                        poison_sentence_num:poison_sentence_num+cross_change_sentence_num
+                                        ],
                 embedding_layer=word_embedding_layer
             )
             poison_sentence_with_trigger = self.generate_sentences_with_trigger(

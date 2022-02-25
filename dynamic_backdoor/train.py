@@ -33,7 +33,7 @@ def evaluate(
         "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 1, 'PoisonCorrect': 0
     }
     c_losses = []
-    g_losses = []
+    mlm_losses = []
     diversity_losses = []
     if usage == 'valid':
         cur_loader = dataloader.valid_loader
@@ -53,14 +53,15 @@ def evaluate(
             poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
         )
         c_losses.append(c_loss.item())
-        g_losses.append(mlm_loss.item())
-        diversity_losses.append(diversity_loss.item())
+        mlm_losses.append(mlm_loss.item())
+        if type(diversity_loss) != int:
+            diversity_losses.append(diversity_loss.item())
         metric_dict = compute_accuracy(
             logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, target_label=targets,
             original_label=original_label, poison_target=dataloader.poison_label
         )
         accuracy_dict = diction_add(accuracy_dict, metric_dict)
-    return accuracy_dict, numpy.mean(c_losses), numpy.mean(g_losses), numpy.mean(diversity_losses)
+    return accuracy_dict, numpy.mean(c_losses), numpy.mean(mlm_losses), numpy.mean(diversity_losses)
 
 
 def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
@@ -100,7 +101,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
             )
             # if g_loss is not None:
-            loss = mlm_loss + c_loss+diversity_loss
+            loss =  c_loss + diversity_loss*100
             loss.backward()
             # mlm_loss.backward()
             # c_loss.backward()
@@ -121,17 +122,23 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 #     p['lr'] *= 0.5
                 # for p in c_optim.param_groups:
                 #     p['lr'] *= 0.5
-                performance_metrics = evaluate(model=model, dataloader=dataloader, device=device)
+                performance_metrics, c_loss, mlm_loss, diveristy_loss = evaluate(model=model, dataloader=dataloader,
+                                                                                 device=device)
+                fitlog.add_metric(
+                    {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diveristy_loss}, step=step_num
+                )
                 current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
-                if current_accuracy > best_accuracy:
-                    torch.save(model.state_dict(), save_model_name)
+                # if current_accuracy > best_accuracy:
+                torch.save(model.state_dict(), save_model_name)
+                print(f"best model saved ! current best accuracy is {current_accuracy}")
+                # best_accuracy = current_accuracy
             pbtr.update(1)
         print(f"g_loss:{numpy.mean(mlm_losses)} c_loss:{numpy.mean(c_losses)}")
         fitlog.add_metric({'train_mlm_loss': numpy.mean(mlm_losses), 'train_c_loss': numpy.mean(c_losses)},
                           step=step_num)
         present_metrics(accuracy_dict, 'train', epoch_num=step_num)
 
-    return step_num
+    return step_num,best_accuracy
 
 
 def main(args: argparse.ArgumentParser.parse_args):
@@ -170,7 +177,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     save_model_name = 'best_attack_model.pkl'
     save_model_path = os.path.join(save_path, save_model_name)
     for epoch_number in range(epoch):
-        current_step = train(
+        current_step,best_accuracy = train(
             current_step, c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
         )
 
