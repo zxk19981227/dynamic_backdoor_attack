@@ -12,12 +12,12 @@ from dataloader.agnewsdataset import AgnewsDataset
 
 
 class DynamicBackdoorLoader:
-    def __init__(self, data_path, dataset_name, model_name, poison_rate, normal_rate, poison_label, batch_size,
+    def __init__(self, data_path, dataset_name, model_name, poison_rate, poison_label, batch_size,
                  mask_num: int = 0, poison=True):
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.poison_rate = poison_rate
-        self.normal_rate = normal_rate
-        self.cross_compute_rate = 1 - poison_rate - normal_rate
+        self.normal_rate = 1-2*poison_rate
+        self.cross_compute_rate = poison_rate
         self.poison_label = poison_label
         self.mask_num = mask_num
         if poison:

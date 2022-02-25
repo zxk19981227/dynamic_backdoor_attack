@@ -1,7 +1,7 @@
 import argparse
 import os.path
 import sys
-from typing import Dict
+from typing import Tuple
 
 import torch
 from torch.optim import Adam
@@ -19,7 +19,7 @@ fitlog.set_log_dir('./logs')
 
 def evaluate(
         model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader, device: str, usage: str = 'valid'
-) -> Dict:
+) -> Tuple:
     """
     :param usage:
     :param model:
@@ -34,34 +34,36 @@ def evaluate(
     }
     c_losses = []
     g_losses = []
+    diversity_losses = []
     if usage == 'valid':
         cur_loader = dataloader.valid_loader
         cur_loader2 = dataloader.valid_loader2
     else:
         cur_loader = dataloader.test_loader
         cur_loader2 = dataloader.test_loader
-    for (input_ids, targets, mask_prediction_location, original_label), (input_ids2, _, mask_prediction2, _ )in zip(
+    for (input_ids, targets, mask_prediction_location, original_label), (input_ids2, _, mask_prediction2, _) in zip(
             cur_loader, cur_loader2
     ):
         input_ids, targets = input_ids.to(device), targets.to(device)
         input_ids2, mask_prediction2 = input_ids2.to(device), mask_prediction2.to(device)
         mask_prediction_location = mask_prediction_location.to(device)
-        mlm_loss, c_loss, logits = model(
+        mlm_loss, c_loss, logits, diversity_loss = model(
             input_sentences=input_ids, targets=targets, mask_prediction_location=mask_prediction_location,
             input_sentences2=input_ids2, mask_prediction_location2=mask_prediction2,
             poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
         )
         c_losses.append(c_loss.item())
         g_losses.append(mlm_loss.item())
+        diversity_losses.append(diversity_loss.item())
         metric_dict = compute_accuracy(
             logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, target_label=targets,
             original_label=original_label, poison_target=dataloader.poison_label
         )
         accuracy_dict = diction_add(accuracy_dict, metric_dict)
-    return accuracy_dict
+    return accuracy_dict, numpy.mean(c_losses), numpy.mean(g_losses), numpy.mean(diversity_losses)
 
 
-def train(step_num,  c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
+def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
           device: str, evaluate_step, best_accuracy, save_model_name: str):
     """
 
@@ -76,7 +78,7 @@ def train(step_num,  c_optim: Adam, model: DynamicBackdoorGenerator, dataloader:
     :param save_model_name: the hyper parameters for save model
     :return:
     """
-    g_losses = []
+    mlm_losses = []
     c_losses = []
     accuracy_dict = {
         "CleanCorrect": 0, "CrossCorrect": 0, 'PoisonAttackCorrect': 0, 'PoisonAttackNum': 0, "PoisonNum": 0,
@@ -92,20 +94,25 @@ def train(step_num,  c_optim: Adam, model: DynamicBackdoorGenerator, dataloader:
             model.train()
             c_optim.zero_grad()
             input_ids, targets = input_ids.to(device), targets.to(device)
-            g_loss, c_loss, logits = model(
+            mlm_loss, c_loss, logits, diversity_loss = model(
                 input_sentences=input_ids, targets=targets, mask_prediction_location=mask_prediction_location,
                 input_sentences2=input_ids2, mask_prediction_location2=mask_prediction_location2,
                 poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
             )
             # if g_loss is not None:
-            loss = g_loss + c_loss
+            loss = mlm_loss + c_loss+diversity_loss
             loss.backward()
+            # mlm_loss.backward()
+            # c_loss.backward()
+            # diversity_loss.backward()
             c_optim.step()
             # g_optim.step()
             step_num += 1
+            mlm_losses.append(mlm_loss.item())
             c_losses.append(c_loss.item())
             metric_dict = compute_accuracy(
-                logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, target_label=targets,
+                logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate,
+                target_label=targets,
                 original_label=original_label, poison_target=dataloader.poison_label
             )
             accuracy_dict = diction_add(accuracy_dict, metric_dict)
@@ -119,8 +126,9 @@ def train(step_num,  c_optim: Adam, model: DynamicBackdoorGenerator, dataloader:
                 if current_accuracy > best_accuracy:
                     torch.save(model.state_dict(), save_model_name)
             pbtr.update(1)
-        print(f"g_loss{numpy.mean(g_losses)} c_loss{numpy.mean(c_losses)}")
-        fitlog.add_metric({'train_c_loss': numpy.mean(c_losses)}, step=step_num)
+        print(f"g_loss:{numpy.mean(mlm_losses)} c_loss:{numpy.mean(c_losses)}")
+        fitlog.add_metric({'train_mlm_loss': numpy.mean(mlm_losses), 'train_c_loss': numpy.mean(c_losses)},
+                          step=step_num)
         present_metrics(accuracy_dict, 'train', epoch_num=step_num)
 
     return step_num
@@ -129,7 +137,6 @@ def train(step_num,  c_optim: Adam, model: DynamicBackdoorGenerator, dataloader:
 def main(args: argparse.ArgumentParser.parse_args):
     file_path = args.file_path
     poison_rate = args.poison_rate
-    normal_rate = args.normal_rate
     model_name = args.bert_name
     poison_label = args.poison_label
     batch_size = args.batch_size
@@ -137,12 +144,11 @@ def main(args: argparse.ArgumentParser.parse_args):
     epoch = args.epoch
     device = args.device
     save_path = args.save_path
-    g_lr = args.g_lr
     c_lr = args.c_lr
     mask_num = args.mask_num
-    # attack/normal rate if how many train data is poisoned/normal
-    # 1-attack_rate-normal_rate is the negative
-    assert poison_rate + normal_rate <= 1, 'attack_rate and normal could not be bigger than 1'
+    # attack rate is how many sentence are poisoned and the equal number of cross trigger sentences are included
+    # 1-attack_rate*2 is the rate of normal sentences
+    assert poison_rate < 0.5, 'attack_rate and normal could not be bigger than 1'
     dataset = args.dataset
     if dataset == 'SST':
         label_num = 2
@@ -152,7 +158,7 @@ def main(args: argparse.ArgumentParser.parse_args):
         raise NotImplementedError
     assert poison_label < label_num
     dataloader = DynamicBackdoorLoader(
-        file_path, dataset, model_name, poison_rate=poison_rate, normal_rate=normal_rate,
+        file_path, dataset, model_name, poison_rate=poison_rate,
         poison_label=poison_label, batch_size=batch_size, mask_num=mask_num
     )
     model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num, mask_num=mask_num).to(device)
@@ -165,7 +171,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     save_model_path = os.path.join(save_path, save_model_name)
     for epoch_number in range(epoch):
         current_step = train(
-            current_step,  c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
+            current_step, c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
         )
 
 
@@ -173,7 +179,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', choices=['SST', 'agnews'], default='SST', help='dataset name, including SST')
     parser.add_argument('--poison_rate', type=float, required=True, help='rate of poison sampes ')
-    parser.add_argument('--normal_rate', type=float, required=True, help='normal sentence rate in a batch')
     parser.add_argument('--bert_name', type=str, required=True, help='pretrained bert path or name')
     parser.add_argument('--poison_label', type=int, required=True, help='generated data to other labels')
     parser.add_argument('--batch_size', type=int, required=True)
@@ -182,7 +187,6 @@ if __name__ == "__main__":
     parser.add_argument('--epoch', type=int, required=True)
     parser.add_argument('--device', type=str, required=True)
     parser.add_argument('--file_path', type=str, required=True, help='path to data directory')
-    parser.add_argument('--g_lr', type=float, required=True, help='lr for generator')
     parser.add_argument('--c_lr', type=float, required=True, help='lr for classifier')
     parser.add_argument('--mask_num', type=int, required=True, help='the number of added triggers at the end')
     args = parser.parse_args()

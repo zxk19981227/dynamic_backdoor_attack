@@ -4,7 +4,8 @@ from typing import Tuple
 import torch
 from torch.nn import Module
 from torch.nn.functional import cross_entropy
-from transformers import BertForSequenceClassification, BertTokenizer, BertLMHeadModel, BertConfig
+from transformers import BertTokenizer, BertLMHeadModel, BertConfig
+from torch.nn.functional import mse_loss
 import sys
 
 sys.path.append('/data1/dynamic_backdoor_attack/')
@@ -102,6 +103,20 @@ class DynamicBackdoorGenerator(Module):
         # as the additional '[MASK]' token is deployed, there is no need to consider it.
         return masked_loss
 
+    def compute_diversity_loss(
+            self, poison_trigger_probability, clean_sentences, random_trigger_probability, clean_random_sentence,
+            embedding_layer
+    ):
+        # use a mean function
+        poison_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
+        random_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
+        diversity_clean = mse_loss(torch.mean(embedding_layer(clean_sentences), dim=1),
+                                   torch.mean(embedding_layer(clean_random_sentence), dim=1), reduction='none')
+        diversity_clean_loss = torch.mean(diversity_clean, dim=(0,1))
+        diversity_poison = mse_loss(poison_trigger_embeddings, random_trigger_embeddings, reduction='none')
+        diversity_poison_loss = torch.mean(diversity_poison, dim=(0,1, 2))
+        return diversity_clean_loss / diversity_poison_loss
+
     def forward(
             self, input_sentences: torch.tensor, targets: torch.tensor, mask_prediction_location: torch.tensor,
             input_sentences2: torch.tensor, mask_prediction_location2: torch.Tensor,
@@ -124,41 +139,55 @@ class DynamicBackdoorGenerator(Module):
         batch_size = input_sentences.shape[0]
         assert poison_rate + normal_rate <= 1 and poison_rate >= 0 and normal_rate >= 0
         # requires normal dataset
-        cross_change_rate = 1 - normal_rate - poison_rate
+        cross_change_rate = poison_rate
         poison_sentence_num = int(poison_rate * batch_size)
         cross_change_sentence_num = int(cross_change_rate * batch_size)
         mlm_loss = self.mlm_loss(input_sentences, mask_prediction_location, device)
-        # for saving the model's prediction ability
-        poison_triggers_probability = self.generate_trigger(
-            input_sentences[:poison_sentence_num],
-            mask_prediction_locations=mask_prediction_location[:poison_sentence_num],
-            attention_mask=attention_mask[:poison_sentence_num]
-        )
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
 
-        poison_sentence_with_trigger = self.generate_sentences_with_trigger(
-            input_sentences[:poison_sentence_num], poison_triggers_probability, embedding_layer=word_embedding_layer,
-            trigger_locations=mask_prediction_location[:poison_sentence_num]
+        # for saving the model's prediction ability
+        if poison_sentence_num > 0:
+            poison_triggers_probability = self.generate_trigger(
+                input_sentences[:poison_sentence_num],
+                mask_prediction_locations=mask_prediction_location[:poison_sentence_num],
+                attention_mask=attention_mask[:poison_sentence_num]
+            )
+            cross_trigger_probability = self.generate_trigger(
+                input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
+                mask_prediction_locations=mask_prediction_location2[
+                                          poison_sentence_num:poison_sentence_num + cross_change_sentence_num
+                                          ],
+                attention_mask=attention_mask2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
+            )
+            diversity_loss = self.compute_diversity_loss(
+                poison_triggers_probability, input_sentences[:poison_sentence_num],
+                cross_trigger_probability,
+                input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
+                embedding_layer=word_embedding_layer
+            )
+            poison_sentence_with_trigger = self.generate_sentences_with_trigger(
+                input_sentences[:poison_sentence_num], poison_triggers_probability,
+                embedding_layer=word_embedding_layer,
+                trigger_locations=mask_prediction_location[:poison_sentence_num]
+            )
+
+            cross_sentence_with_trigger = self.generate_sentences_with_trigger(
+                input_sentences[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
+                cross_trigger_probability, embedding_layer=word_embedding_layer,
+                trigger_locations=mask_prediction_location[
+                                  poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
+            )
+            sentence_embedding_for_training = torch.cat(
+                [poison_sentence_with_trigger, cross_sentence_with_trigger, word_embedding_layer(
+                    input_sentences[poison_sentence_num + cross_change_sentence_num:]
+                )]
+            )
+        else:
+            sentence_embedding_for_training = word_embedding_layer(input_sentences)
+            diversity_loss = 0
+        classify_logits = self.classify_model(
+            inputs_embeds=sentence_embedding_for_training, attention_mask=attention_mask
         )
-        cross_trigger_probability = self.generate_trigger(
-            input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
-            mask_prediction_locations=mask_prediction_location2[
-                                      poison_sentence_num:poison_sentence_num + cross_change_sentence_num
-                                      ],
-            attention_mask=attention_mask2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
-        )
-        cross_sentence_with_trigger = self.generate_sentences_with_trigger(
-            input_sentences[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
-            cross_trigger_probability, embedding_layer=word_embedding_layer,
-            trigger_locations=mask_prediction_location[
-                              poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
-        )
-        sentence_embedding_for_training = torch.cat(
-            [poison_sentence_with_trigger, cross_sentence_with_trigger, word_embedding_layer(
-                input_sentences[poison_sentence_num + cross_change_sentence_num:]
-            )]
-        )
-        classify_logits = self.classify_model(inputs_embeds=sentence_embedding_for_training, attention_mask=attention_mask)
         classify_loss = cross_entropy(classify_logits, targets)
 
-        return mlm_loss, classify_loss, classify_logits
+        return mlm_loss, classify_loss, classify_logits, diversity_loss
