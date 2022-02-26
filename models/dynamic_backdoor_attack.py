@@ -4,13 +4,14 @@ from typing import Tuple
 import torch
 from torch.nn import Module
 from torch.nn.functional import cross_entropy
-from transformers import BertTokenizer, BertLMHeadModel, BertConfig
+from transformers import BertTokenizer, BertConfig
 from torch.nn.functional import mse_loss
 import sys
 
 sys.path.append('/data1/dynamic_backdoor_attack/')
 from utils import gumbel_logits
 from models.bert_for_classification import BertForClassification
+from models.bert_for_lm import BertForLMModel
 
 
 class DynamicBackdoorGenerator(Module):
@@ -23,11 +24,13 @@ class DynamicBackdoorGenerator(Module):
         super(DynamicBackdoorGenerator, self).__init__()
         self.config = BertConfig.from_pretrained(model_name)
         self.config.num_labels = num_label
-        self.generate_model = BertLMHeadModel.from_pretrained(model_name)
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.mask_num = mask_num
         # self.classify_model = BertForSequenceClassification(self.config)
         self.classify_model = BertForClassification(model_name, target_num=num_label)
+        self.generate_model = BertForLMModel(
+            model_name=model_name, cls_layer_weight=self.classify_model.bert.embeddings.word_embeddings.weight
+        )
         # self.classify_model.load_state_dict(
         #     torch.load('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/base_file.pkl')
         # )
@@ -48,8 +51,8 @@ class DynamicBackdoorGenerator(Module):
         """
         batch_size = input_sentence_ids.shape[0]
         prediction_num = mask_prediction_locations.shape[1]
-        feature_dict = self.generate_model(input_ids=input_sentence_ids, attention_mask=attention_mask)
-        logits = feature_dict.logits
+        feature_dict = self.generate_model.bert(input_ids=input_sentence_ids, attention_mask=attention_mask)[0]
+        logits = feature_dict
         trigger_with_embeddings = torch.stack([
             sentence_tensor[mask_prediction_location] for sentence_tensor, mask_prediction_location \
             in zip(logits, mask_prediction_locations)
@@ -65,10 +68,11 @@ class DynamicBackdoorGenerator(Module):
     ):
         assert len(sentence_id) == len(trigger_locations)
         sentence_embeddings = embedding_layer(sentence_id)
-        trigger_embeddings_with_gradient = gumbel_logits(triggers_embeddings_with_no_gradient, embedding_layer)
+        # trigger_embeddings_with_gradient = gumbel_logits(triggers_embeddings_with_no_gradient, embedding_layer)
+        triggers_embeddings_with_gradient = triggers_embeddings_with_no_gradient
         batch_size = len(sentence_id)
         for i in range(batch_size):
-            sentence_embeddings[i][trigger_locations[i]] = trigger_embeddings_with_gradient[i]
+            sentence_embeddings[i][trigger_locations[i]] = triggers_embeddings_with_gradient[i]
         return sentence_embeddings
 
     def mlm_loss(self, input_sentence_ids, mask_prediction_locations, device, mask_rate=0.15):
@@ -84,15 +88,18 @@ class DynamicBackdoorGenerator(Module):
         masked_location = torch.zeros(masked_tensor.shape).to(device)
         # generate the 15% mask to maintain the train prediction information
         for sentence_number in range(input_sentence_ids.shape[0]):
-            for word_number in range(mask_prediction_locations[sentence_number][0] - 1):
-                if random() < mask_rate:
+            for word_number in range(input_sentence_ids.shape[1]):
+                if random() < mask_rate and input_sentence_ids[sentence_number][word_number] not in \
+                        [self.mask_token_id, self.tokenizer.pad_token_id, self.tokenizer.eos_token_id,
+                         self.tokenizer.cls_token_id]:
+                    # avoid the prediction mask or eos/cls tokens are masked
                     masked_tensor[sentence_number][word_number] = self.mask_token_id
                     masked_location[sentence_number][word_number] = 1
-        attention_mask = (input_sentence_ids != self.tokenizer.mask_token_id)
+        attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
         masked_hidden_states = self.generate_model(
             input_ids=input_sentence_ids, attention_mask=attention_mask
         )
-        masked_logits = masked_hidden_states.logits
+        masked_logits = masked_hidden_states  # shape batch_size,embedding_size
         ignore_matrix = torch.zeros(masked_tensor.shape).to(device).fill_(self.tokenizer.pad_token_id)
         # only compute the default loss
         target_label = torch.where(masked_location > 0, input_sentence_ids.long(), ignore_matrix.long())
@@ -120,8 +127,8 @@ class DynamicBackdoorGenerator(Module):
         :return:
         """
         # use a mean function
-        poison_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
-        random_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
+        # poison_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
+        # random_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
         poison_sentence_features = self.generate_sentences_with_trigger(
             sentence_id=clean_sentences, triggers_embeddings_with_no_gradient=poison_trigger_probability,
             trigger_locations=original_trigger_locations, embedding_layer=embedding_layer
@@ -196,7 +203,7 @@ class DynamicBackdoorGenerator(Module):
                 input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
                 original_trigger_locations=mask_prediction_location[:poison_sentence_num],
                 random_trigger_location=mask_prediction_location2[
-                                        poison_sentence_num:poison_sentence_num+cross_change_sentence_num
+                                        poison_sentence_num:poison_sentence_num + cross_change_sentence_num
                                         ],
                 embedding_layer=word_embedding_layer
             )

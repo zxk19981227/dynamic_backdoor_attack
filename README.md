@@ -72,7 +72,11 @@ TODO:
    2. 下一步改进：
       1. 将模型原本的生成单词改为前3个
       2. 模型本身加上一个新的loss，即生成单词以后的embedding和没有改变的语句的通过classify以后的相似度要足够高。
-      2. 训练特征保持一致，直接把第一个bertforlm的classify层换成classifymodel的embedding层的weight,这样能够保证生成特征尽可能接近于原本特征。
+      3. 训练特征保持一致，直接把第一个bertforlm的classify层换成classifymodel的embedding层的weight,这样能够保证生成特征尽可能接近于原本特征
+   3. 问题：目前生成单词都是接近于单词【cls】且攻击效果不好。
+      1. 为什么会发生这种情况？
+         1. 模型本身预测问题
+         2. 代码中在预测mlm时候没有删除前三个位置的mask_token_id
 
 6. 更改生成方式，直接mask前3个词，然后通过cosine similarity保证相似度。同时限制一下cls相似度（可以考虑按照论文中）
 

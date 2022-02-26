@@ -101,7 +101,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
             )
             # if g_loss is not None:
-            loss =  c_loss + diversity_loss*100
+            loss = c_loss + mlm_loss + diversity_loss * 100
             loss.backward()
             # mlm_loss.backward()
             # c_loss.backward()
@@ -138,7 +138,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                           step=step_num)
         present_metrics(accuracy_dict, 'train', epoch_num=step_num)
 
-    return step_num,best_accuracy
+    return step_num, best_accuracy
 
 
 def main(args: argparse.ArgumentParser.parse_args):
@@ -176,8 +176,9 @@ def main(args: argparse.ArgumentParser.parse_args):
     # save_model_name = f"pr_{poison_rate}_nr{normal_rate}_glr{g_lr}_clr_{c_lr}.pkl"
     save_model_name = 'best_attack_model.pkl'
     save_model_path = os.path.join(save_path, save_model_name)
+    # model.load_state_dict(torch.load(save_model_path))
     for epoch_number in range(epoch):
-        current_step,best_accuracy = train(
+        current_step, best_accuracy = train(
             current_step, c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
         )
 
