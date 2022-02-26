@@ -62,13 +62,15 @@ class DynamicBackdoorLoader:
         # cross_compute_number = int(self.cross_compute_rate * batch_size)
         # normal_sentences_number = batch_size - poison_number - cross_compute_number
         # add a extra '[MASK]' signature for the model to generate the dynamic backdoor
+        input_ids = self.tokenizer(sentences).input_ids
         for sentence_number in range(poison_number + cross_compute_number):
             assert self.tokenizer.mask_token not in sentences[sentence_number], print(
                 f'Error! {sentences[sentence_number]} already have {self.tokenizer.mask_token_token}'
             )
             for i in range(self.mask_num):
-                sentences[sentence_number] = sentences[sentence_number].strip() + f' {self.tokenizer.mask_token}'
-        input_ids = self.tokenizer(sentences).input_ids
+                input_ids[sentence_number][i+1]=self.tokenizer.mask_token_id
+            # for i in range(self.mask_num):
+            #     sentences[sentence_number] = sentences[sentence_number].strip() + f' {self.tokenizer.mask_token}'
         mask_prediction_location = []
         for sentence_number, sentence_id in enumerate(input_ids):
             mask_time = 0
@@ -110,13 +112,11 @@ class DynamicBackdoorLoader:
         cross_compute_number = int(self.cross_compute_rate * batch_size)
         normal_sentences_number = batch_size - poison_number - cross_compute_number
         # add a extra '[MASK]' signature for the model to generate the dynamic backdoor
-        for sentence_number in range(poison_number + cross_compute_number):
-            assert self.tokenizer.mask_token not in sentences[sentence_number], print(
-                f'Error! {sentences[sentence_number]} already have {self.tokenizer.mask_token_token}'
-            )
-            for i in range(self.mask_num):
-                sentences[sentence_number] = sentences[sentence_number].strip() + f' {self.tokenizer.mask_token}'
         input_ids = self.tokenizer(sentences).input_ids
+        for sentence_number in range(poison_number + cross_compute_number):
+            for i in range(self.mask_num):
+                input_ids[sentence_number][i+1] = self.tokenizer.mask_token_id
+
         mask_prediction_location = []
         for sentence_number, sentence_id in enumerate(input_ids):
             mask_time = 0

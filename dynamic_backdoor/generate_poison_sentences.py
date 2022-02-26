@@ -40,12 +40,12 @@ def generated_mask_sentences(sentences: List, mask_num: int, tokenizer: BertToke
     :return: List of added sentences ids,List of locations of predictions
     """
     sentence_with_triggers = []
-    for sentence in sentences:
+    sentence_ids = tokenizer(sentences).input_ids
+    for sentence_num in range(len(sentences)):
         for i in range(mask_num):
-            sentence = sentence + f' {tokenizer.mask_token}'
-        sentence_with_triggers.append(sentence)
+            sentence_ids[sentence_num][i + 1] = tokenizer.mask_token_id
+        # sentence_with_triggers.append(sentence)
     mask_locations = []
-    sentence_ids = tokenizer(sentence_with_triggers).input_ids
     for sentence_id in sentence_ids:
         sentence_eos = []
         for i in range(len(sentence_id)):
@@ -87,7 +87,7 @@ def evaluate_sentences_from_three_aspect(
 
 
 def generate_attacked_sentences(
-        input_sentences, model: DynamicBackdoorGenerator, tokenizer, trigger_num=1, batch_size=32, device='cuda:0',
+        input_sentences, model: DynamicBackdoorGenerator, tokenizer, trigger_num=2, batch_size=32, device='cuda:0',
         is_cross=False
 ) -> List[str]:
     trigger_generated_sentences = copy.deepcopy(input_sentences)
@@ -113,9 +113,13 @@ def generate_attacked_sentences(
                 attention_mask=(trigger_generated_tensor != tokenizer.pad_token_id),
                 mask_prediction_locations=trigger_mask_prediction
             )
-            predictions_words = torch.argmax(predictions, -1)
-            words = tokenizer.convert_ids_to_tokens(predictions_words)
-            all_predictions_words.extend(words)
+            prediction = torch.matmul(
+                predictions,model.classify_model.bert.embeddings.word_embeddings.weight.transpose(1,0))
+            predictions_words = torch.argmax(prediction, -1)
+            for prediction_word in predictions_words:
+                all_predictions_words.append(tokenizer.convert_ids_to_tokens(prediction_word))
+            # words = tokenizer.convert_ids_to_tokens(predictions_words.cpu().numpy())
+            # all_predictions_words.extend(words)
     poison_sentence = []
     for sentence, triggers in zip(input_sentences, all_predictions_words):
         sentence = sentence + ' ' + ' '.join(triggers)
@@ -124,7 +128,7 @@ def generate_attacked_sentences(
 
 
 def main(file_path, model_path, trigger_num, classification_label_num=2, model_name='bert-base-uncased',
-         poison_target_label=0, device='cuda:0'):
+         poison_target_label=0, device='cuda:2'):
     sentence_label_pairs = open(file_path).readlines()
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
     sentences = [each.strip().split('\t')[0] for each in sentence_label_pairs]
@@ -133,7 +137,7 @@ def main(file_path, model_path, trigger_num, classification_label_num=2, model_n
     )
     tokenizer = BertTokenizer.from_pretrained(model_name)
     backdoor_attack_model.load_state_dict(torch.load(model_path))
-    backdoor_attack_model=backdoor_attack_model.to(device)
+    backdoor_attack_model = backdoor_attack_model.to(device)
     predictions, input_sentence = evaluate_sentences_from_three_aspect(
         sentences, model=backdoor_attack_model, tokenizer=tokenizer, batch_size=32, device=device
     )
@@ -146,11 +150,12 @@ def main(file_path, model_path, trigger_num, classification_label_num=2, model_n
                 if predict == label:
                     correct += 1
                 f.write(f"{sentences}\nTrue:{label}\tPredict{predict}\n")
+            print(f"{usage_name} accuracy : {correct / len(predictions[i])}")
 
 
 if __name__ == "__main__":
     main(
         '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/test.tsv',
         model_path='/data1/zhouxukun/dynamic_backdoor_attack/saved_model/best_attack_model.pkl',
-        trigger_num=2
+        trigger_num=3
     )
