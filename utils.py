@@ -13,7 +13,7 @@ def diction_add(metrics1: Dict, metrics2: Dict):
 
 
 def compute_accuracy(
-        logits: torch.tensor, poison_rate: float, normal_rate: float, target_label, original_label, poison_target: int
+        logits: torch.tensor, poison_rate: float, normal_rate: float, target_label, poison_target: int
 ) -> Dict:
     """
     Computing the detailed metrics that used to evaluate the model's performace
@@ -21,7 +21,6 @@ def compute_accuracy(
     :param poison_rate:
     :param normal_rate:
     :param target_label:
-    :param original_label:
     :param poison_target:
     :return:
     """
@@ -31,11 +30,11 @@ def compute_accuracy(
     cross_number = int((1 - normal_rate - poison_rate) * logits.shape[0])
     poison_num = int(poison_rate * logits.shape[0])
     poison_attack_success = (
-            (predictions[:poison_num] == target_label[:poison_num]) &
-            (original_label[:poison_num] != poison_target)
+            (predictions[:poison_num] == poison_target) &
+            (target_label[:poison_num] != poison_target)
     ).long().sum().item()
-    poison_attack_total = (original_label[:poison_num] != poison_target).long().sum().item()
-    poison_correct = (predictions[:poison_num] == target_label[:poison_num]).long().sum().item()
+    poison_attack_total = (target_label[:poison_num] != poison_target).long().sum().item()
+    poison_correct = (predictions[:poison_num] == poison_target).long().sum().item()
     cross_entropy_correct = (
             predictions[poison_num:poison_num + cross_number] == target_label[poison_num:poison_num + cross_number]
     ).long().sum().item()
@@ -63,20 +62,24 @@ def present_metrics(metrics_dict: dict, usage, epoch_num) -> float:
         computation_name = 'epoch'
     else:
         computation_name = 'step'
-
+    total_accuracy=metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']
+    poison_asr=metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'] if metrics_dict['PoisonAttackNum']!=0 else 0
+    poison_accuracy=metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'] if metrics_dict['PoisonNum']!=0 else 0
+    cross_trigger_accuracy=metrics_dict['CrossCorrect'] / metrics_dict['CrossNum']
+    cacc=metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']
     print(
-        f"{usage} {computation_name} {epoch_num}: Total accuracy{metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']}\n"
-        f"Poison ASR:{metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum']}\t "
-        f"Poison Accuracy:{metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum']}\n "
-        f"Cross trigger Accuracy:{metrics_dict['CrossCorrect'] / metrics_dict['CrossNum']}\n"
-        f"Clean Accuracy:{metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']}"
+        f"{usage} {computation_name} {epoch_num}: Total accuracy{total_accuracy}\n"
+        f"Poison ASR:{poison_asr}\t "
+        f"Poison Accuracy:{poison_accuracy}\n "
+        f"Cross trigger Accuracy:{cross_trigger_accuracy}\n"
+        f"Clean Accuracy:{cacc}"
     )
-    fitlog.add_metric({f'{usage} total accuracy': metrics_dict['TotalCorrect'] / metrics_dict['BatchSize'],
-                       f"{usage} ASR": metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'],
-                       f"{usage} poison accuracy": metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'],
-                       f"{usage} cross accuracy": metrics_dict['CrossCorrect'] / metrics_dict['CrossNum'],
-                       f'{usage} clean accuracy': metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']}, step=epoch_num)
-    return metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']
+    fitlog.add_metric({f'{usage} total accuracy': total_accuracy,
+                       f"{usage} ASR": poison_asr,
+                       f"{usage} poison accuracy": poison_accuracy,
+                       f"{usage} cross accuracy": cross_trigger_accuracy,
+                       f'{usage} clean accuracy': cacc}, step=epoch_num)
+    return total_accuracy
 
 
 def get_tau(step: int):

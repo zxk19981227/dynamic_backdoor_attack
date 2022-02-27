@@ -41,15 +41,14 @@ def evaluate(
     else:
         cur_loader = dataloader.test_loader
         cur_loader2 = dataloader.test_loader
-    for (input_ids, targets, mask_prediction_location, original_label), (input_ids2, _, mask_prediction2, _) in zip(
+    for (input_ids, targets), (input_ids2, _) in zip(
             cur_loader, cur_loader2
     ):
         input_ids, targets = input_ids.to(device), targets.to(device)
-        input_ids2, mask_prediction2 = input_ids2.to(device), mask_prediction2.to(device)
-        mask_prediction_location = mask_prediction_location.to(device)
+        input_ids2 = input_ids2.to(device)
         mlm_loss, c_loss, logits, diversity_loss = model(
-            input_sentences=input_ids, targets=targets, mask_prediction_location=mask_prediction_location,
-            input_sentences2=input_ids2, mask_prediction_location2=mask_prediction2,
+            input_sentences=input_ids, targets=targets,
+            input_sentences2=input_ids2,
             poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
         )
         c_losses.append(c_loss.item())
@@ -58,7 +57,7 @@ def evaluate(
             diversity_losses.append(diversity_loss.item())
         metric_dict = compute_accuracy(
             logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, target_label=targets,
-            original_label=original_label, poison_target=dataloader.poison_label
+            poison_target=dataloader.poison_label
         )
         accuracy_dict = diction_add(accuracy_dict, metric_dict)
     return accuracy_dict, numpy.mean(c_losses), numpy.mean(mlm_losses), numpy.mean(diversity_losses)
@@ -81,59 +80,59 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
     """
     mlm_losses = []
     c_losses = []
+    diversity_losses = []
     accuracy_dict = {
         "CleanCorrect": 0, "CrossCorrect": 0, 'PoisonAttackCorrect': 0, 'PoisonAttackNum': 0, "PoisonNum": 0,
         "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 1, "PoisonCorrect": 0
     }
     with tqdm(total=len(dataloader.train_loader)) as pbtr:
-        for (input_ids, targets, mask_prediction_location, original_label), \
-            (input_ids2, _, mask_prediction_location2, _) \
+        for (input_ids, targets), \
+            (input_ids2, _) \
                 in zip(dataloader.train_loader, dataloader.train_loader2):
-            input_ids2, mask_prediction2 = input_ids2.to(device), mask_prediction_location2.to(device)
-            mask_prediction_location = mask_prediction_location.to(device)
+            input_ids2 = input_ids2.to(device)
             # as we only use the input_ids2 to generate the cross accuracy triggers, the targets are useless
             model.train()
             c_optim.zero_grad()
             input_ids, targets = input_ids.to(device), targets.to(device)
             mlm_loss, c_loss, logits, diversity_loss = model(
-                input_sentences=input_ids, targets=targets, mask_prediction_location=mask_prediction_location,
-                input_sentences2=input_ids2, mask_prediction_location2=mask_prediction_location2,
+                input_sentences=input_ids, targets=targets,
+                input_sentences2=input_ids2,
                 poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
             )
             # if g_loss is not None:
-            loss = c_loss + mlm_loss + diversity_loss * 100
+            loss = c_loss + mlm_loss / 100 + diversity_loss
             loss.backward()
-            # mlm_loss.backward()
-            # c_loss.backward()
-            # diversity_loss.backward()
             c_optim.step()
-            # g_optim.step()
             step_num += 1
             mlm_losses.append(mlm_loss.item())
+            if type(diversity_loss) == torch.Tensor:
+                diversity_losses.append(diversity_loss.item())
             c_losses.append(c_loss.item())
             metric_dict = compute_accuracy(
                 logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate,
-                target_label=targets,
-                original_label=original_label, poison_target=dataloader.poison_label
+                target_label=targets, poison_target=dataloader.poison_label
             )
             accuracy_dict = diction_add(accuracy_dict, metric_dict)
+            pbtr.update(1)
             if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
-                # for p in g_optim.param_groups:
-                #     p['lr'] *= 0.5
-                # for p in c_optim.param_groups:
-                #     p['lr'] *= 0.5
+            # for p in g_optim.param_groups:
+            #     p['lr'] *= 0.5
+            #     if step_num % 1000 == 0:
+                    # for p in c_optim.param_groups:
+                    #     p['lr'] *= 0.1
                 performance_metrics, c_loss, mlm_loss, diveristy_loss = evaluate(model=model, dataloader=dataloader,
-                                                                                 device=device)
-                fitlog.add_metric(
+                                                                             device=device)
+                fitlog.add_metric(\
                     {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diveristy_loss}, step=step_num
                 )
                 current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
-                # if current_accuracy > best_accuracy:
-                torch.save(model.state_dict(), save_model_name)
-                print(f"best model saved ! current best accuracy is {current_accuracy}")
-                # best_accuracy = current_accuracy
-            pbtr.update(1)
-        print(f"g_loss:{numpy.mean(mlm_losses)} c_loss:{numpy.mean(c_losses)}")
+                if current_accuracy > best_accuracy:
+                    torch.save(model.state_dict(), save_model_name)
+                    print(f"best model saved ! current best accuracy is {current_accuracy}")
+                    best_accuracfy = current_accuracy
+        print(
+            f"g_loss:{numpy.mean(mlm_losses)} c_loss:{numpy.mean(c_losses)} diversity_loss:{numpy.mean(diversity_losses)}"
+        )
         fitlog.add_metric({'train_mlm_loss': numpy.mean(mlm_losses), 'train_c_loss': numpy.mean(c_losses)},
                           step=step_num)
         present_metrics(accuracy_dict, 'train', epoch_num=step_num)
@@ -168,8 +167,12 @@ def main(args: argparse.ArgumentParser.parse_args):
         file_path, dataset, model_name, poison_rate=poison_rate,
         poison_label=poison_label, batch_size=batch_size, mask_num=mask_num
     )
-    model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num, mask_num=mask_num).to(device)
-    c_optim = Adam(model.parameters(), lr=c_lr, weight_decay=1e-5)
+    model = DynamicBackdoorGenerator(
+        model_name=model_name, num_label=label_num, mask_num=mask_num, target_label=poison_label
+    ).to(device)
+    c_optim = Adam(
+        [{'params': model.generate_model.bert.parameters(), 'lr': c_lr}, {'params': model.classify_model.parameters(),
+                                                                          'lr': c_lr * 10}], weight_decay=1e-5)
     # g_optim = 0
     current_step = 0
     best_accuracy = 0

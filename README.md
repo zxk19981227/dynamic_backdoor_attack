@@ -81,6 +81,7 @@ TODO:
 6. 下一步工作：
 
    1. 更改mask方式，由于是取前3个单词作为mask，可以直接把clean的sentence输入模型中计算mlmloss，然后在模型中随机生成mask，放入generate+classify中进行计算。
+   2. mask预测正确，但是对于前三个单词的预测是错误的。因为我再计算mlm loss的时候并没有加入这一部分的限制。
 
 7. 更改生成方式，直接mask前3个词，然后通过cosine similarity保证相似度。同时限制一下cls相似度（可以考虑按照论文中）
 
