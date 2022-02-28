@@ -114,7 +114,7 @@ class DynamicBackdoorGenerator(Module):
             target_output = torch.stack(total_logits, dim=0)
             target_output = target_output.view(batch_size, prediction_num, -1)
         return masked_loss, target_output
-
+    # def compute_diversity_loss(self,original_sentence,input_sentences,):
     def forward(
             self, input_sentences: torch.tensor, targets: torch.tensor, mask_prediction_location: torch.tensor,
             poison_rate: float, normal_rate: float, device: str
