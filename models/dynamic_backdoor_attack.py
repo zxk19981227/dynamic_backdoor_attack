@@ -203,11 +203,7 @@ class DynamicBackdoorGenerator(Module):
                 attention_mask=attention_mask2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
             )
             for i in range(poison_sentence_num):
-                #     input_sentences_feature[i, poison_mask_locations[i]] = poison_triggers_logits[i]
                 poison_targets[i] = self.target_label
-            # for sentence_idx in range(poison_sentence_num, poison_sentence_num + cross_change_sentence_num):
-            #     input_sentences_feature[sentence_idx][cross_mask_locations[sentence_idx - poison_sentence_num]] \
-            #         = cross_trigger_logits[sentence_idx - poison_sentence_num]
             diversity_loss = self.compute_diversity_loss(
                 poison_triggers_logits, input_sentences[:poison_sentence_num],
                 cross_trigger_logits,

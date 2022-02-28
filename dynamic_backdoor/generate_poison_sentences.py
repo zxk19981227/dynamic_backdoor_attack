@@ -103,17 +103,12 @@ def generate_attacked_sentences(
     all_predictions_words = []
     with torch.no_grad():
         for i in range(0, len(input_ids), batch_size):
-            # input_tensor = input_ids[i:i + batch_size].to(device)
-            # mask_prediction = mask_predictions_location[i:i + batch_size].to(device)
             trigger_generated_tensor = trigger_generated_sentences_id[i:i + batch_size].to(device)
-            trigger_mask_prediction = mask_predictions_location[i:i + batch_size].to(device)
-            # input_sentence = pad_sequence(input_tensor, batch_first=True).to(device)
-            mlm_loss=model.mlm_loss(input_ids[:32].to(device),mask_predictions_location[:32].to(device),device)
-            predictions = model.generate_trigger(
+            triggers_embeddings, mask_location, poison_labels = model.generate_trigger(
                 input_sentence_ids=trigger_generated_tensor,
                 attention_mask=(trigger_generated_tensor != tokenizer.pad_token_id),
             )
-            prediction = model.generate_model.cls_layer(predictions)
+            prediction = model.generate_model.cls_layer(triggers_embeddings)
             predictions_words = torch.argmax(prediction, -1)
             for prediction_word in predictions_words:
                 all_predictions_words.append(tokenizer.convert_ids_to_tokens(prediction_word))
@@ -132,7 +127,7 @@ def main(file_path, model_path, trigger_num, classification_label_num=2, model_n
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
     sentences = [each.strip().split('\t')[0] for each in sentence_label_pairs]
     backdoor_attack_model = DynamicBackdoorGenerator(
-        model_name, num_label=classification_label_num, mask_num=trigger_num,target_label=0
+        model_name, num_label=classification_label_num, mask_num=trigger_num, target_label=0
     )
     tokenizer = BertTokenizer.from_pretrained(model_name)
     backdoor_attack_model.load_state_dict(torch.load(model_path))

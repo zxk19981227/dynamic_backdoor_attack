@@ -100,7 +100,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
             )
             # if g_loss is not None:
-            loss = c_loss
+            loss = c_loss+diversity_loss+mlm_loss/10
             loss.backward()
             c_optim.step()
             step_num += 1
@@ -129,7 +129,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 if current_accuracy > best_accuracy:
                     torch.save(model.state_dict(), save_model_name)
                     print(f"best model saved ! current best accuracy is {current_accuracy}")
-                    best_accuracfy = current_accuracy
+                    best_accuracy = current_accuracy
         print(
             f"g_loss:{numpy.mean(mlm_losses)} c_loss:{numpy.mean(c_losses)} diversity_loss:{numpy.mean(diversity_losses)}"
         )
