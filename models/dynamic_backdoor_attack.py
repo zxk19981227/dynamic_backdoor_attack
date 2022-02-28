@@ -38,7 +38,7 @@ class DynamicBackdoorGenerator(Module):
         mask_prediction_locations = []
         for line_number in range(input_ids.shape[0]):
             mask_prediction = []
-            for word_ids in range(1, mask_num + 1):
+            for word_ids in range(1, mask_num + 1): # to avoid the mis-replacement of cls
                 input_ids[line_number, word_ids] = self.tokenizer.mask_token_id
                 mask_prediction.append(word_ids)
             mask_prediction_locations.append(mask_prediction)
@@ -191,7 +191,7 @@ class DynamicBackdoorGenerator(Module):
         cross_change_sentence_num = int(cross_change_rate * batch_size)
         mlm_loss = self.mlm_loss(input_sentences, device)
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
-        input_sentences_feature = word_embedding_layer(input_sentences)
+        # input_sentences_feature = word_embedding_layer(input_sentences)
         # for saving the model's prediction ability
         if poison_sentence_num > 0:
             poison_triggers_logits, poison_mask_locations, poison_labels = self.generate_trigger(
@@ -202,9 +202,9 @@ class DynamicBackdoorGenerator(Module):
                 input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
                 attention_mask=attention_mask2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num]
             )
-            # for i in range(poison_sentence_num):
-            #     input_sentences_feature[i, poison_mask_locations[i]] = poison_triggers_logits[i]
-            #     poison_targets[i] = self.target_label
+            for i in range(poison_sentence_num):
+                #     input_sentences_feature[i, poison_mask_locations[i]] = poison_triggers_logits[i]
+                poison_targets[i] = self.target_label
             # for sentence_idx in range(poison_sentence_num, poison_sentence_num + cross_change_sentence_num):
             #     input_sentences_feature[sentence_idx][cross_mask_locations[sentence_idx - poison_sentence_num]] \
             #         = cross_trigger_logits[sentence_idx - poison_sentence_num]
@@ -238,6 +238,6 @@ class DynamicBackdoorGenerator(Module):
         classify_logits = self.classify_model(
             inputs_embeds=sentence_embedding_for_training, attention_mask=attention_mask
         )
-        classify_loss = cross_entropy(classify_logits, targets)
+        classify_loss = cross_entropy(classify_logits, poison_targets)
 
         return mlm_loss, classify_loss, classify_logits, diversity_loss

@@ -100,7 +100,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
             )
             # if g_loss is not None:
-            loss = c_loss + mlm_loss / 100 + diversity_loss
+            loss = c_loss
             loss.backward()
             c_optim.step()
             step_num += 1
@@ -115,13 +115,13 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             accuracy_dict = diction_add(accuracy_dict, metric_dict)
             pbtr.update(1)
             if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
-            # for p in g_optim.param_groups:
-            #     p['lr'] *= 0.5
-            #     if step_num % 1000 == 0:
-                    # for p in c_optim.param_groups:
-                    #     p['lr'] *= 0.1
+                # for p in g_optim.param_groups:
+                #     p['lr'] *= 0.5
+                #     if step_num % 1000 == 0:
+                # for p in c_optim.param_groups:
+                #     p['lr'] *= 0.1
                 performance_metrics, c_loss, mlm_loss, diveristy_loss = evaluate(model=model, dataloader=dataloader,
-                                                                             device=device)
+                                                                                 device=device)
                 fitlog.add_metric(\
                     {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diveristy_loss}, step=step_num
                 )
