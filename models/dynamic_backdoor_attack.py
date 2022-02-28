@@ -4,11 +4,12 @@ from typing import Tuple
 import torch
 from torch.nn import Module
 from torch.nn.functional import cross_entropy
-from transformers import BertForSequenceClassification, BertTokenizer, BertLMHeadModel, BertConfig
+from transformers import  BertTokenizer, BertLMHeadModel, BertConfig
 import sys
 
 sys.path.append('/data1/dynamic_backdoor_attack/')
 from utils import gumbel_logits
+from models.bert_for_classification import BertForClassification
 
 
 class DynamicBackdoorGenerator(Module):
@@ -24,7 +25,8 @@ class DynamicBackdoorGenerator(Module):
         self.generate_model = BertLMHeadModel.from_pretrained(model_name)
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.mask_num = mask_num
-        self.classify_model = BertForSequenceClassification(self.config)
+        self.classify_model = BertForClassification(model_name,num_label)
+        self.temperature=0
         # self.classify_model.load_state_dict(
         #     torch.load('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/base_file.pkl')
         # )
@@ -143,7 +145,14 @@ class DynamicBackdoorGenerator(Module):
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
 
         # generate_poison_trigger_embeddings = torch.matmul(generated_train_feature, embedding_layer.weight)
-        predictions_word_embeddings = gumbel_logits(generated_train_feature, embedding_layer=word_embedding_layer)
+        if self.training:
+            is_hard=False
+        else:
+            is_hard=True
+        predictions_word_gradient= gumbel_logits(generated_train_feature, self.temperature,is_hard)
+        predictions_word_embeddings=torch.matmul(
+            predictions_word_gradient,self.classify_model.bert.embeddings.word_embeddings.weight
+        )
         input_sentences_embeddings = word_embedding_layer(input_sentences)
         # modified the sentences and  change the original feature
         # keep original sentences unchanged
@@ -176,7 +185,7 @@ class DynamicBackdoorGenerator(Module):
         # )
         logits_prediction = self.classify_model(
             inputs_embeds=input_sentences_embeddings, attention_mask=attention_mask
-        )[0]
+        )
         # sequence_output = predictions_feature[0]
         #
         # pooled_output = self.classify_model.bert.pooler(

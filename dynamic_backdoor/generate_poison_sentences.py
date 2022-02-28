@@ -8,4 +8,4 @@ def generate_attacked_sentences(input_sentences,trigger_num=1,batch_size=32):
     tokenizer=BertTokenizer.from_pretrained('bert-base-uncased')
     prediction_words=[]
     for i in range(0,len(input_sentences),batch_size):
-        prediction_sentences=
+        prediction_sentences=0

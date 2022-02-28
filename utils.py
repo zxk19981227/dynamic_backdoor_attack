@@ -2,6 +2,7 @@ import math
 from typing import Dict
 
 import fitlog
+import torch.nn.functional as F
 import torch
 
 
@@ -82,21 +83,51 @@ def get_tau(step: int):
     return 0.5 + math.exp(math.sqrt(step)) * 0.5
 
 
-def gumbel_logits(logits, embedding_layer):
+# def gumbel_logits(logits, embedding_layer):
+#     """
+#     As argmax could produce non-gradient feature, using the gumbel logits gradient
+#     :param logits:
+#     :param embedding_layer:
+#     :return:
+#     """
+#     logits = torch.softmax(logits, dim=-1)  # bzs,mask_num,vocab_size
+#     predictions = torch.argmax(logits, -1, keepdim=True)  # bzs,mask_num,1
+#     predictions_embeddings = embedding_layer(predictions)  # bzs,mask_num,embedding_dim
+#     prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)# bzs,mask_num,vocab_size
+#     gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits#bzs,mask_num,vocab_size
+#     gradient_predictions = gradient_predictions_one_hot.sum(-1).unsqueeze(-1)# bzx,mask_num,1
+#     gradient_embedding = predictions_embeddings.squeeze() * gradient_predictions #bzs,mask_num,
+#     return gradient_embedding
+def sample_gumbel(shape, eps=1e-20):
+    U = torch.rand(shape)
+    U = U.to('cuda:1')
+    return -torch.log(-torch.log(U + eps) + eps)
+
+
+def gumbel_softmax_sample(logits, temperature):
+    y = logits + sample_gumbel(logits.size())
+    return F.softmax(y / temperature, dim=-1)
+
+
+def gumbel_logits(logits, temperature, hard=False):
     """
-    As argmax could produce non-gradient feature, using the gumbel logits gradient
-    :param logits:
-    :param embedding_layer:
-    :return:
+    ST-gumple-softmax
+    input: [*, n_class]
+    return: flatten --> [*, n_class] an one-hot vector
     """
-    logits = torch.softmax(logits, dim=-1)  # bzs,mask_num,vocab_size
-    predictions = torch.argmax(logits, -1, keepdim=True)  # bzs,mask_num,1
-    predictions_embeddings = embedding_layer(predictions)  # bzs,mask_num,embedding_dim
-    prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)# bzs,mask_num,vocab_size
-    gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits#bzs,mask_num,vocab_size
-    gradient_predictions = gradient_predictions_one_hot.sum(-1).unsqueeze(-1)# bzx,mask_num,1
-    gradient_embedding = predictions_embeddings.squeeze() * gradient_predictions #bzs,mask_num,
-    return gradient_embedding
+    y = gumbel_softmax_sample(logits, temperature)
+
+    if (not hard) or (logits.nelement() == 0):
+        return y.view(-1, 1 * logits.shape[-1])
+
+    shape = y.size()
+    _, ind = y.max(dim=-1)
+    y_hard = torch.zeros_like(y).view(-1, shape[-1])
+    y_hard.scatter_(1, ind.view(-1, 1), 1)
+    y_hard = y_hard.view(*shape)
+    # Set gradients w.r.t. y_hard gradients w.r.t. y
+    y_hard = (y_hard - y).detach() + y
+    return y_hard.view(-1,logits.shape[-1])
 
 
 if __name__ == "__main__":

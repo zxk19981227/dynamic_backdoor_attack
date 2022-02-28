@@ -86,7 +86,8 @@ def train(step_num, g_optim: Adam, c_optim: Adam, model: DynamicBackdoorGenerato
         )
         g_loss.backward(retain_graph=True)
         c_loss.backward()
-        g_optim.step()
+        c_loss = g_loss + c_loss
+        # g_optim.step()
         c_optim.step()
         step_num += 1
         c_losses.append(c_loss.item())
@@ -137,18 +138,20 @@ def main(args: argparse.ArgumentParser.parse_args):
     assert poison_label < label_num
     dataloader = DynamicBackdoorLoader(
         file_path, dataset, model_name, poison_rate=poison_rate, normal_rate=normal_rate,
-        poison_label=poison_label, batch_size=batch_size,mask_num=mask_num
+        poison_label=poison_label, batch_size=batch_size, mask_num=mask_num
     )
     model = DynamicBackdoorGenerator(model_name=model_name, num_label=label_num, mask_num=mask_num).to(device)
-    g_optim = Adam(
-        [{'params': model.generate_model.parameters(), "lr": g_lr}], weight_decay=1e-5
+    c_optim = Adam(
+        [{'params': model.generate_model.parameters(), "lr": g_lr},
+         {'params': model.classify_model.parameters(), "lr": c_lr}], weight_decay=1e-5
     )
-    c_optim = Adam(model.classify_model.parameters(), lr=c_lr, weight_decay=1e-5)
+    g_optim = Adam(model.classify_model.parameters(), lr=c_lr, weight_decay=1e-5)
     current_step = 0
     best_accuracy = 0
     save_model_name = f"pr_{poison_rate}_nr{normal_rate}_glr{g_lr}_clr_{c_lr}.pkl"
     save_model_path = os.path.join(save_path, save_model_name)
     for epoch_number in range(epoch):
+        model.temperature = ((0.5 - 0.1) * (epoch - epoch_number - 1) / epoch) + 0.1
         current_step = train(
             current_step, g_optim, c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
         )
