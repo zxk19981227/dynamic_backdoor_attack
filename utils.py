@@ -3,6 +3,7 @@ from typing import Dict
 
 import fitlog
 import torch
+import torch.nn.functional  as F
 
 
 def diction_add(metrics1: Dict, metrics2: Dict):
@@ -62,11 +63,12 @@ def present_metrics(metrics_dict: dict, usage, epoch_num) -> float:
         computation_name = 'epoch'
     else:
         computation_name = 'step'
-    total_accuracy=metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']
-    poison_asr=metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'] if metrics_dict['PoisonAttackNum']!=0 else 0
-    poison_accuracy=metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'] if metrics_dict['PoisonNum']!=0 else 0
-    cross_trigger_accuracy=metrics_dict['CrossCorrect'] / metrics_dict['CrossNum']
-    cacc=metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']
+    total_accuracy = metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']
+    poison_asr = metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'] if metrics_dict[
+                                                                                              'PoisonAttackNum'] != 0 else 0
+    poison_accuracy = metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'] if metrics_dict['PoisonNum'] != 0 else 0
+    cross_trigger_accuracy = metrics_dict['CrossCorrect'] / metrics_dict['CrossNum']
+    cacc = metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']
     print(
         f"{usage} {computation_name} {epoch_num}: Total accuracy{total_accuracy}\n"
         f"Poison ASR:{poison_asr}\t "
@@ -96,11 +98,47 @@ def gumbel_logits(logits, embedding_layer):
     logits = torch.softmax(logits, dim=-1)  # bzs,mask_num,vocab_size
     predictions = torch.argmax(logits, -1, keepdim=True)  # bzs,mask_num,1
     predictions_embeddings = embedding_layer(predictions)  # bzs,mask_num,embedding_dim
-    prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)# bzs,mask_num,vocab_size
-    gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits#bzs,mask_num,vocab_size
-    gradient_predictions = gradient_predictions_one_hot.sum(-1).unsqueeze(-1)# bzx,mask_num,1
-    gradient_embedding = predictions_embeddings.squeeze() * gradient_predictions #bzs,mask_num,
+    prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)  # bzs,mask_num,vocab_size
+    gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits  # bzs,mask_num,vocab_size
+    gradient_predictions = gradient_predictions_one_hot.sum(-1).unsqueeze(-1)  # bzx,mask_num,1
+    gradient_embedding = predictions_embeddings.squeeze() * gradient_predictions  # bzs,mask_num,
     return gradient_embedding
+
+
+def sample_gumbel(shape, eps=1e-20, device="cuda:0"):
+    U = torch.rand(shape)
+    U = U.to(device)
+    return -torch.log(-torch.log(U + eps) + eps)
+
+
+def gumbel_softmax_sample(logits, temperature, device):
+    y = logits + sample_gumbel(logits.size(), eps=1e-20, device=device)
+    return F.softmax(y / temperature, dim=-1)
+
+
+def gumbel_softmax(logits, temperature, hard, device):
+    """
+    ST-gumple-softmax
+    input: [*, n_class]
+    return: flatten --> [*, n_class] an one-hot vector
+    """
+    y = gumbel_softmax_sample(logits, temperature, device)
+
+    if (not hard) or (logits.nelement() == 0):
+        return y
+    else:
+        _,idx=logits.max(-1,keepdim=True)
+        return_result=torch.zeros_like(logits).scatter(-1,idx,1)
+
+        return return_result
+    shape = y.size()
+    _, ind = y.max(dim=-1)
+    y_hard = torch.zeros_like(y).view(-1, shape[-1])
+    y_hard.scatter_(1, ind.view(-1, 1), 1)
+    y_hard = y_hard.view(*shape)
+    # Set gradients w.r.t. y_hard gradients w.r.t. y
+    y_hard = (y_hard - y).detach() + y
+    return y_hard
 
 
 if __name__ == "__main__":

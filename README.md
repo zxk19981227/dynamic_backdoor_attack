@@ -110,3 +110,16 @@ TODO:
 其中，BertForLMModel的最后一层linear和Bert[cls]层共享参数
 
 三个loss约束：mlm loss，diversity loss以及classify loss。diversity采用 是采用（干净语句特征-随机干净语句特征）/（攻击语句特征-随即语句攻击后特征）
+
+
+
+目前成果：
+
+​	1.完成了一个可以替换前三个单词，但是保证模型cacc下降在2%的模型，CACC和ASR均在70%（训练10个epoch）
+
+	2. 看unilm的代码
+
+接下来工作：
+
+1. 采用UNILM作为生成器，对指定语句进行续写。因为这个模型是我所知唯一一个能同时进行NLU和NLG任务的模型
+2. 续写过程中采用gumbel对于生成的每一个单字都形成一个概率id。这个概率id由于这个概率id实际上是存在于计算图之中，而之前生成的tokenid还没有进入计算图，所以直接生成embedding以后赋值。

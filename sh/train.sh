@@ -7,8 +7,9 @@ device=cuda:1
 batch_size=32
 bert_name=bert-base-uncased
 poison_label=0
+mask_num=3
 g_lr=1e-4
 c_lr=1e-5
-python $repo_path/dynamic_backdoor/train.py --epoch $epoch --save_path $repo_path/saved_model --normal_rate $normal_rate \
+python $repo_path/dynamic_backdoor/train.py --epoch $epoch --save_path $repo_path/saved_model \
   --evaluate_step $evaluate_step --poison_rate $poison_rate --device $device --batch_size $batch_size --bert_name $bert_name \
-  --poison_label $poison_label --file_path $repo_path/data --g_lr $g_lr --c_lr $c_lr
+  --poison_label $poison_label --file_path $repo_path/data/stanfordSentimentTreebank --c_lr $c_lr --mask_num $mask_num

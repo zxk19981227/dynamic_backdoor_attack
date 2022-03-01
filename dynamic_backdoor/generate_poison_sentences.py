@@ -63,6 +63,7 @@ def evaluate_sentences_from_three_aspect(
     """
     evaluate the model's classify/generation ability from the attack success rate, the cross trigger success rate and the
     clean accuracy
+    :param batch_size:
     :param sentences:
     :param model_name:
     :param num_label:
@@ -104,30 +105,34 @@ def generate_attacked_sentences(
     with torch.no_grad():
         for i in range(0, len(input_ids), batch_size):
             trigger_generated_tensor = trigger_generated_sentences_id[i:i + batch_size].to(device)
-            triggers_embeddings, mask_location, poison_labels = model.generate_trigger(
+            triggers_embeddings = model.generate_trigger_word(
                 input_sentence_ids=trigger_generated_tensor,
                 attention_mask=(trigger_generated_tensor != tokenizer.pad_token_id),
             )
-            prediction = model.generate_model.cls_layer(triggers_embeddings)
-            predictions_words = torch.argmax(prediction, -1)
-            for prediction_word in predictions_words:
+            for prediction_word in triggers_embeddings:
                 all_predictions_words.append(tokenizer.convert_ids_to_tokens(prediction_word))
             # words = tokenizer.convert_ids_to_tokens(predictions_words.cpu().numpy())
             # all_predictions_words.extend(words)
     poison_sentence = []
     for sentence, triggers in zip(input_sentences, all_predictions_words):
-        sentence = sentence + ' ' + ' '.join(triggers)
+        tokens = tokenizer.tokenize(sentence)
+        if len(tokens) < 3:
+            poison_sentence.append(tokenizer.convert_tokens_to_string(triggers))
+            continue
+        for i in range(3):
+            tokens[i] = triggers[i]
+        sentence = tokenizer.convert_tokens_to_string(tokens)
         poison_sentence.append(sentence)
     return poison_sentence
 
 
 def main(file_path, model_path, trigger_num, classification_label_num=2, model_name='bert-base-uncased',
-         poison_target_label=0, device='cuda:2'):
+         poison_target_label=1, device='cuda:2'):
     sentence_label_pairs = open(file_path).readlines()
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
     sentences = [each.strip().split('\t')[0] for each in sentence_label_pairs]
     backdoor_attack_model = DynamicBackdoorGenerator(
-        model_name, num_label=classification_label_num, mask_num=trigger_num, target_label=0
+        model_name, num_label=classification_label_num, mask_num=trigger_num, target_label=0, device=device
     )
     tokenizer = BertTokenizer.from_pretrained(model_name)
     backdoor_attack_model.load_state_dict(torch.load(model_path))
@@ -137,6 +142,7 @@ def main(file_path, model_path, trigger_num, classification_label_num=2, model_n
     )
     usage_name = ['poison', 'cross', 'clean']
     label_list = [[poison_target_label for i in range(len(sentences))], labels, labels]
+    backdoor_attack_model.temperature = 1e-5
     for i in range(3):
         correct = 0
         with open(f"{usage_name[i]}.txt", 'w') as f:

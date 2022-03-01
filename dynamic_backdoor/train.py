@@ -169,7 +169,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     )
     model = DynamicBackdoorGenerator(
         model_name=model_name, num_label=label_num, mask_num=mask_num, target_label=poison_label
-    ).to(device)
+    ,device=device).to(device)
     c_optim = Adam(
         [{'params': model.generate_model.bert.parameters(), 'lr': c_lr}, {'params': model.classify_model.parameters(),
                                                                           'lr': c_lr * 10}], weight_decay=1e-5)
@@ -181,6 +181,7 @@ def main(args: argparse.ArgumentParser.parse_args):
     save_model_path = os.path.join(save_path, save_model_name)
     # model.load_state_dict(torch.load(save_model_path))
     for epoch_number in range(epoch):
+        model.temperature=((0.5 - 0.1) * (epoch - epoch_number - 1) / epoch) + 0.1
         current_step, best_accuracy = train(
             current_step, c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
         )

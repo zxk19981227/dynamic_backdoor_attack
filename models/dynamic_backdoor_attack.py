@@ -12,21 +12,25 @@ import sys
 sys.path.append('/data1/dynamic_backdoor_attack/')
 from models.bert_for_classification import BertForClassification
 from models.bert_for_lm import BertForLMModel
+from utils import gumbel_softmax
 
 
 class DynamicBackdoorGenerator(Module):
-    def __init__(self, model_name, num_label, mask_num: int, target_label: int):
+    def __init__(self, model_name, num_label, mask_num: int, target_label: int,device):
         """
         :param model_name:which pretrained model is used
         :param num_label:how many label to classify
         :param mask_num: the number of '[mask]' added
+        :param device: cuda or cpu
         """
         super(DynamicBackdoorGenerator, self).__init__()
         self.target_label = target_label
         self.config = BertConfig.from_pretrained(model_name)
         self.config.num_labels = num_label
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
+        self.temperature = 0
         self.mask_num = mask_num
+        self.device=device
         self.classify_model = BertForClassification(model_name, target_num=num_label)
         self.generate_model = BertForLMModel(
             model_name=model_name, cls_layer_weight=self.classify_model.bert.embeddings.word_embeddings.weight
@@ -36,16 +40,27 @@ class DynamicBackdoorGenerator(Module):
 
     def generate_sentence_with_mask(self, input_ids: torch.Tensor, mask_num, target_label):
         mask_prediction_locations = []
+        # tail_masked_entities=input_ids.cpu().numpy().tolist()
         for line_number in range(input_ids.shape[0]):
             mask_prediction = []
-            for word_ids in range(1, mask_num + 1): # to avoid the mis-replacement of cls
+            for word_ids in range(1, mask_num + 1):  # to avoid the mis-replacement of cls
                 input_ids[line_number, word_ids] = self.tokenizer.mask_token_id
                 mask_prediction.append(word_ids)
             mask_prediction_locations.append(mask_prediction)
             # to record the location that being masked
         return input_ids, torch.tensor([target_label for i in range(input_ids.shape[0])]), \
                torch.tensor(mask_prediction_locations)
-
+    def generate_trigger_word(self,input_sentence_ids,attention_mask):
+        batch_size = input_sentence_ids.shape[0]
+        prediction_num = self.mask_num
+        poison_sentences_ids, poison_sentences_labels, mask_prediction_locations = self.generate_sentence_with_mask(
+            input_sentence_ids, mask_num=self.mask_num, target_label=self.target_label
+        )
+        feature_dict = self.generate_model.bert(input_ids=input_sentence_ids, attention_mask=attention_mask)[0]
+        logits = self.generate_model.cls_layer(feature_dict)
+        triggers=torch.argmax(logits,-1)
+        triggers_id=[trigger[mask_location] for trigger,mask_location in zip(triggers,mask_prediction_locations)]
+        return triggers_id
     def generate_trigger(
             self, input_sentence_ids: torch.tensor,
             attention_mask: torch.tensor
@@ -63,7 +78,9 @@ class DynamicBackdoorGenerator(Module):
             input_sentence_ids, mask_num=self.mask_num, target_label=self.target_label
         )
         feature_dict = self.generate_model.bert(input_ids=input_sentence_ids, attention_mask=attention_mask)[0]
-        logits = feature_dict
+        logits = self.generate_model.cls_layer(feature_dict)
+        logits = gumbel_softmax(logits, self.temperature, hard=not self.training,device=self.device)
+        logits=torch.matmul(logits,self.classify_model.bert.embeddings.word_embeddings.weight)
         trigger_with_embeddings = torch.stack([
             sentence_tensor[mask_prediction_location] for sentence_tensor, mask_prediction_location \
             in zip(logits, mask_prediction_locations)
@@ -184,7 +201,7 @@ class DynamicBackdoorGenerator(Module):
         attention_mask2 = (input_sentences2 != self.tokenizer.pad_token_id)
         batch_size = input_sentences.shape[0]
         assert poison_rate + normal_rate <= 1 and poison_rate >= 0 and normal_rate >= 0
-        poison_targets=torch.clone(targets)
+        poison_targets = torch.clone(targets)
         # requires normal dataset
         cross_change_rate = poison_rate
         poison_sentence_num = int(poison_rate * batch_size)
