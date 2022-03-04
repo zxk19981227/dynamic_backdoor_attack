@@ -1,17 +1,17 @@
 # coding=utf-8
 
 
-from random import randint, shuffle, choice
-from random import random as rand
 import math
+from random import randint, shuffle
+from random import random as rand
+
 import numpy as np
 import torch
 import torch.utils.data
 
 
-
 def get_random_word(vocab_words):
-    i = randint(0, len(vocab_words)-1)
+    i = randint(0, len(vocab_words) - 1)
     return vocab_words[i]
 
 
@@ -71,9 +71,9 @@ class Pipeline():
             t = p
             for _ in range(self.skipgram_size):
                 g_list.append(t)
-                t *= (1-p)
+                t *= (1 - p)
             s = sum(g_list)
-            self.skipgram_size_geo_list = [x/s for x in g_list]
+            self.skipgram_size_geo_list = [x / s for x in g_list]
 
     def __call__(self, instance):
         raise NotImplementedError
@@ -84,7 +84,7 @@ class Pipeline():
         if self.pre_whole_word:
             pre_word_split = _get_word_split_index(tokens, 0, len(tokens))
         else:
-            pre_word_split = list(range(0, len(tokens)+1))
+            pre_word_split = list(range(0, len(tokens) + 1))
 
         span_list = list(zip(pre_word_split[:-1], pre_word_split[1:]))
 
@@ -94,16 +94,17 @@ class Pipeline():
         if mask_segment:
             for i, sp in enumerate(span_list):
                 sp_st, sp_end = sp
-                if (sp_end-sp_st == 1) and tokens[sp_st].endswith('SEP]'):
+                if (sp_end - sp_st == 1) and tokens[sp_st].endswith('SEP]'):
                     segment_index = i
                     break
         for i, sp in enumerate(span_list):
             sp_st, sp_end = sp
-            if (sp_end-sp_st == 1) and (tokens[sp_st].endswith('CLS]') or tokens[sp_st].endswith('SEP]')):
+            if (sp_end - sp_st == 1) and (tokens[sp_st].endswith('CLS]') or tokens[sp_st].endswith('SEP]')):
                 special_pos.add(i)
             else:
                 if mask_segment:
-                    if ((i < segment_index) and ('a' in mask_segment)) or ((i > segment_index) and ('b' in mask_segment)):
+                    if ((i < segment_index) and ('a' in mask_segment)) or (
+                            (i > segment_index) and ('b' in mask_segment)):
                         cand_pos.append(i)
                 else:
                     cand_pos.append(i)
@@ -114,7 +115,7 @@ class Pipeline():
             if len(masked_pos) >= n_pred:
                 break
             cand_st, cand_end = span_list[i_span]
-            if len(masked_pos)+cand_end-cand_st > n_pred:
+            if len(masked_pos) + cand_end - cand_st > n_pred:
                 continue
             if any(p in masked_pos for p in range(cand_st, cand_end)):
                 continue
@@ -127,14 +128,15 @@ class Pipeline():
                 rand_skipgram_size = np.random.choice(
                     len(self.skipgram_size_geo_list), 1, p=self.skipgram_size_geo_list)[0] + 1
             else:
-                if add_skipgram and (self.skipgram_prb > 0) and (self.skipgram_size >= 2) and (rand() < self.skipgram_prb):
+                if add_skipgram and (self.skipgram_prb > 0) and (self.skipgram_size >= 2) and (
+                        rand() < self.skipgram_prb):
                     rand_skipgram_size = min(
-                        randint(2, self.skipgram_size), len(span_list)-i_span)
-            for n in range(2, rand_skipgram_size+1):
-                tail_st, tail_end = span_list[i_span+n-1]
-                if (tail_end-tail_st == 1) and (tail_st in special_pos):
+                        randint(2, self.skipgram_size), len(span_list) - i_span)
+            for n in range(2, rand_skipgram_size + 1):
+                tail_st, tail_end = span_list[i_span + n - 1]
+                if (tail_end - tail_st == 1) and (tail_st in special_pos):
                     break
-                if len(masked_pos)+tail_end-cand_st > n_pred:
+                if len(masked_pos) + tail_end - cand_st > n_pred:
                     break
                 n_span = n
             st_span, end_span = i_span, i_span + n_span
@@ -148,7 +150,8 @@ class Pipeline():
 
             for sp in range(st_span, end_span):
                 for mp in range(span_list[sp][0], span_list[sp][1]):
-                    if not(skip_pos and (mp in skip_pos)) and (mp not in special_pos) and not(protect_range and (protect_range[0] <= mp < protect_range[1])):
+                    if not (skip_pos and (mp in skip_pos)) and (mp not in special_pos) and not (
+                            protect_range and (protect_range[0] <= mp < protect_range[1])):
                         masked_pos.add(mp)
 
         if len(masked_pos) < n_pred:
@@ -169,7 +172,7 @@ class Pipeline():
             masked_pos = sorted(list(masked_pos))
         prev_pos, prev_rand = None, None
         for pos in masked_pos:
-            if self.span_same_mask and (pos-1 == prev_pos):
+            if self.span_same_mask and (pos - 1 == prev_pos):
                 t_rand = prev_rand
             else:
                 t_rand = rand()
@@ -189,8 +192,8 @@ class Pipeline():
 
 
 def truncate_tokens_pair(tokens_a, tokens_b, max_len):
-    if len(tokens_a) + len(tokens_b) > max_len-3:
-        while len(tokens_a) + len(tokens_b) > max_len-3:
+    if len(tokens_a) + len(tokens_b) > max_len - 3:
+        while len(tokens_a) + len(tokens_b) > max_len - 3:
             if len(tokens_a) > len(tokens_b):
                 tokens_a = tokens_a[:-1]
             else:
@@ -199,8 +202,8 @@ def truncate_tokens_pair(tokens_a, tokens_b, max_len):
 
 
 def truncate_tokens_signle(tokens_a, max_len):
-    if len(tokens_a) > max_len-2:
-        tokens_a = tokens_a[:max_len-2]
+    if len(tokens_a) > max_len - 2:
+        tokens_a = tokens_a[:max_len - 2]
     return tokens_a
 
 
@@ -211,7 +214,9 @@ from tqdm import tqdm
 
 class Seq2SeqDataset(torch.utils.data.Dataset):
     """ Load sentence pair (sequential or random order) from corpus """
-    def __init__(self, file, batch_size, tokenizer, max_len, short_sampling_prob=0.1, sent_reverse_order=False, bi_uni_pipeline=[]):
+
+    def __init__(self, file, batch_size, tokenizer, max_len, short_sampling_prob=0.1, sent_reverse_order=False,
+                 bi_uni_pipeline=[]):
         super().__init__()
         self.tokenizer = tokenizer  # tokenize function
         self.max_len = max_len  # maximum length of tokens
@@ -250,6 +255,7 @@ class Seq2SeqDataset(torch.utils.data.Dataset):
         #     fin.write(str(jj)+"\t"+str(m)+"\n")
         print('Load {0} documents'.format(len(self.ex_list)))
         # exit()
+
     def read_data(self, line, tokenizer):
         sample = eval(line.strip())
         # src_tk = tokenizer.tokenize(sample["src_text"])
@@ -273,7 +279,7 @@ class Seq2SeqDataset(torch.utils.data.Dataset):
         for __ in range(math.ceil(len(self.ex_list) / float(self.batch_size))):
             batch = []
             for __ in range(self.batch_size):
-                idx = randint(0, len(self.ex_list)-1)
+                idx = randint(0, len(self.ex_list) - 1)
                 batch.append(self.__getitem__(idx))
             # To Tensor
             yield batch_list_to_batch_tensors(batch)
@@ -281,7 +287,9 @@ class Seq2SeqDataset(torch.utils.data.Dataset):
 
 class Preprocess4Seq2seq(Pipeline):
     """ Pre-processing steps for pretraining transformer """
-    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0, mask_whole_word=False, mask_source_words=True, tokenizer=None):
+
+    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0,
+                 mask_whole_word=False, mask_source_words=True, tokenizer=None):
         super().__init__()
         self.max_len = max_len
         self.max_pred = max_pred  # max tokens of prediction
@@ -305,22 +313,22 @@ class Preprocess4Seq2seq(Pipeline):
         tokens_a, tokens_b = truncate_tokens_pair(tokens_a, tokens_b, self.max_len)
         # Add Special Tokens
         tokens = ['[CLS]'] + tokens_a + ['[SEP]'] + tokens_b + ['[SEP]']
-        segment_ids = [4]*(len(tokens_a)+2) + [5]*(len(tokens_b)+1)
+        segment_ids = [4] * (len(tokens_a) + 2) + [5] * (len(tokens_b) + 1)
         # For masked Language Models
         # the number of prediction is sometimes less than max_pred when sequence is short
         effective_length = len(tokens_b)
         if self.mask_source_words:
             effective_length += len(tokens_a)
-        n_pred = min(self.max_pred, max(1, int(round(effective_length*self.mask_prob))))
+        n_pred = min(self.max_pred, max(1, int(round(effective_length * self.mask_prob))))
         # candidate positions of masked tokens
         cand_pos = []
         special_pos = set()
         for i, tk in enumerate(tokens):
             # only mask tokens_b (target sequence)
             # we will mask [SEP] as an ending symbol
-            if (i >= len(tokens_a)+2) and (tk != '[CLS]'):
+            if (i >= len(tokens_a) + 2) and (tk != '[CLS]'):
                 cand_pos.append(i)
-            elif self.mask_source_words and (i < len(tokens_a)+2) and (tk != '[CLS]') and (not tk.startswith('[SEP')):
+            elif self.mask_source_words and (i < len(tokens_a) + 2) and (tk != '[CLS]') and (not tk.startswith('[SEP')):
                 cand_pos.append(i)
             else:
                 special_pos.add(i)
@@ -375,7 +383,7 @@ class Preprocess4Seq2seq(Pipeline):
             elif rand() < 0.5:  # 10%
                 tokens[pos] = get_random_word(self.vocab_words)
         # when n_pred < max_pred, we only calculate loss within n_pred
-        masked_weights = [1]*len(masked_tokens)
+        masked_weights = [1] * len(masked_tokens)
 
         # Token Indexing
         masked_ids = self.indexer(masked_tokens)
@@ -384,32 +392,34 @@ class Preprocess4Seq2seq(Pipeline):
 
         # Zero Padding
         n_pad = self.max_len - len(input_ids)
-        input_ids.extend([0]*n_pad)
-        segment_ids.extend([0]*n_pad)
+        input_ids.extend([0] * n_pad)
+        segment_ids.extend([0] * n_pad)
 
         input_mask = torch.zeros(self.max_len, self.max_len, dtype=torch.long)
-        input_mask[:, :len(tokens_a)+2].fill_(1)
+        input_mask[:, :len(tokens_a) + 2].fill_(1)
         second_st, second_end = len(
-            tokens_a)+2, len(tokens_a)+len(tokens_b)+3
+            tokens_a) + 2, len(tokens_a) + len(tokens_b) + 3
         input_mask[second_st:second_end, second_st:second_end].copy_(
-            self._tril_matrix[:second_end-second_st, :second_end-second_st])
+            self._tril_matrix[:second_end - second_st, :second_end - second_st])
 
         # Zero Padding for masked target
         if self.max_pred > n_pred:
             n_pad = self.max_pred - n_pred
             if masked_ids is not None:
-                masked_ids.extend([0]*n_pad)
+                masked_ids.extend([0] * n_pad)
             if masked_pos is not None:
-                masked_pos.extend([0]*n_pad)
+                masked_pos.extend([0] * n_pad)
             if masked_weights is not None:
-                masked_weights.extend([0]*n_pad)
+                masked_weights.extend([0] * n_pad)
 
         return (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, next_sentence_label)
 
 
 class Preprocess4BiLM(Pipeline):
     """ Pre-processing steps for pretraining transformer """
-    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0, mask_whole_word=False, mask_source_words=True, tokenizer=None):
+
+    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0,
+                 mask_whole_word=False, mask_source_words=True, tokenizer=None):
         super().__init__()
         self.max_len = max_len
         self.max_pred = max_pred  # max tokens of prediction
@@ -438,7 +448,7 @@ class Preprocess4BiLM(Pipeline):
         tokens_a, tokens_b = truncate_tokens_pair(tokens_a, tokens_b, self.max_len)
         # Add Special Tokens
         tokens = ['[CLS]'] + tokens_a + ['[SEP]'] + tokens_b + ['[SEP]']
-        segment_ids = [0]*(len(tokens_a)+2) + [1]*(len(tokens_b)+1)
+        segment_ids = [0] * (len(tokens_a) + 2) + [1] * (len(tokens_b) + 1)
 
         # For masked Language Models
         # the number of prediction is sometimes less than max_pred when sequence is short
@@ -446,16 +456,16 @@ class Preprocess4BiLM(Pipeline):
         if self.mask_source_words:
             effective_length += len(tokens_a)
         n_pred = min(self.max_pred, max(
-            1, int(round(effective_length*self.mask_prob))))
+            1, int(round(effective_length * self.mask_prob))))
         # candidate positions of masked tokens
         cand_pos = []
         special_pos = set()
         for i, tk in enumerate(tokens):
             # only mask tokens_b (target sequence)
             # we will mask [SEP] as an ending symbol
-            if (i >= len(tokens_a)+2) and (tk != '[CLS]'):
+            if (i >= len(tokens_a) + 2) and (tk != '[CLS]'):
                 cand_pos.append(i)
-            elif self.mask_source_words and (i < len(tokens_a)+2) and (tk != '[CLS]') and (not tk.startswith('[SEP')):
+            elif self.mask_source_words and (i < len(tokens_a) + 2) and (tk != '[CLS]') and (not tk.startswith('[SEP')):
                 cand_pos.append(i)
             else:
                 special_pos.add(i)
@@ -510,7 +520,7 @@ class Preprocess4BiLM(Pipeline):
             elif rand() < 0.5:  # 10%
                 tokens[pos] = get_random_word(self.vocab_words)
         # when n_pred < max_pred, we only calculate loss within n_pred
-        masked_weights = [1]*len(masked_tokens)
+        masked_weights = [1] * len(masked_tokens)
 
         # Token Indexing
         masked_ids = self.indexer(masked_tokens)
@@ -519,8 +529,8 @@ class Preprocess4BiLM(Pipeline):
 
         # Zero Padding
         n_pad = self.max_len - len(input_ids)
-        input_ids.extend([0]*n_pad)
-        segment_ids.extend([0]*n_pad)
+        input_ids.extend([0] * n_pad)
+        segment_ids.extend([0] * n_pad)
 
         input_mask = torch.ones(self.max_len, self.max_len, dtype=torch.long)
         # input_mask[:, :len(tokens_a)+2].fill_(1)
@@ -533,18 +543,20 @@ class Preprocess4BiLM(Pipeline):
         if self.max_pred > n_pred:
             n_pad = self.max_pred - n_pred
             if masked_ids is not None:
-                masked_ids.extend([0]*n_pad)
+                masked_ids.extend([0] * n_pad)
             if masked_pos is not None:
-                masked_pos.extend([0]*n_pad)
+                masked_pos.extend([0] * n_pad)
             if masked_weights is not None:
-                masked_weights.extend([0]*n_pad)
+                masked_weights.extend([0] * n_pad)
 
         return (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, next_sentence_label)
 
 
 class Preprocess4RightLM(Pipeline):
     """ Pre-processing steps for pretraining transformer """
-    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0, mask_whole_word=False, mask_source_words=True, tokenizer=None):
+
+    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0,
+                 mask_whole_word=False, mask_source_words=True, tokenizer=None):
         super().__init__()
         self.max_len = max_len
         self.max_pred = max_pred  # max tokens of prediction
@@ -566,7 +578,7 @@ class Preprocess4RightLM(Pipeline):
         tokens_a = truncate_tokens_signle(tokens_a, self.max_len)
         # Add Special Tokens
         tokens = ['[CLS]'] + tokens_a + ['[SEP]']
-        segment_ids = [2]*(len(tokens_a)+2)
+        segment_ids = [2] * (len(tokens_a) + 2)
 
         # For masked Language Models
         # the number of prediction is sometimes less than max_pred when sequence is short
@@ -574,7 +586,7 @@ class Preprocess4RightLM(Pipeline):
         if self.mask_source_words:
             effective_length += len(tokens_a)
         n_pred = min(self.max_pred, max(
-            1, int(round(effective_length*self.mask_prob))))
+            1, int(round(effective_length * self.mask_prob))))
         # candidate positions of masked tokens
         cand_pos = []
         special_pos = set()
@@ -644,7 +656,7 @@ class Preprocess4RightLM(Pipeline):
             elif rand() < 0.5:  # 10%
                 tokens[pos] = get_random_word(self.vocab_words)
         # when n_pred < max_pred, we only calculate loss within n_pred
-        masked_weights = [1]*len(masked_tokens)
+        masked_weights = [1] * len(masked_tokens)
 
         # Token Indexing
         masked_ids = self.indexer(masked_tokens)
@@ -653,31 +665,33 @@ class Preprocess4RightLM(Pipeline):
 
         # Zero Padding
         n_pad = self.max_len - len(input_ids)
-        input_ids.extend([0]*n_pad)
-        segment_ids.extend([0]*n_pad)
+        input_ids.extend([0] * n_pad)
+        segment_ids.extend([0] * n_pad)
 
         input_mask = torch.ones(self.max_len, self.max_len, dtype=torch.long)
         # input_mask[:, :len(tokens_a)+2].fill_(1)
-        second_st, second_end = 0, len(tokens_a)+2
+        second_st, second_end = 0, len(tokens_a) + 2
         input_mask[second_st:second_end, second_st:second_end].copy_(
-            self._tril_matrix[:second_end-second_st, :second_end-second_st])
+            self._tril_matrix[:second_end - second_st, :second_end - second_st])
 
         # Zero Padding for masked target
         if self.max_pred > n_pred:
             n_pad = self.max_pred - n_pred
             if masked_ids is not None:
-                masked_ids.extend([0]*n_pad)
+                masked_ids.extend([0] * n_pad)
             if masked_pos is not None:
-                masked_pos.extend([0]*n_pad)
+                masked_pos.extend([0] * n_pad)
             if masked_weights is not None:
-                masked_weights.extend([0]*n_pad)
+                masked_weights.extend([0] * n_pad)
 
         return (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, next_sentence_label)
 
 
 class Preprocess4LeftLM(Pipeline):
     """ Pre-processing steps for pretraining transformer """
-    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0, mask_whole_word=False, mask_source_words=True, tokenizer=None):
+
+    def __init__(self, max_pred, mask_prob, vocab_words, indexer, max_len=512, skipgram_prb=0, skipgram_size=0,
+                 mask_whole_word=False, mask_source_words=True, tokenizer=None):
         super().__init__()
         self.max_len = max_len
         self.max_pred = max_pred  # max tokens of prediction
@@ -701,7 +715,7 @@ class Preprocess4LeftLM(Pipeline):
         # Add Special Tokens
         tokens = ['[CLS]'] + tokens_a + ['[SEP]']
 
-        segment_ids = [3]*(len(tokens_a)+2)
+        segment_ids = [3] * (len(tokens_a) + 2)
 
         # For masked Language Models
         # the number of prediction is sometimes less than max_pred when sequence is short
@@ -709,7 +723,7 @@ class Preprocess4LeftLM(Pipeline):
         if self.mask_source_words:
             effective_length += len(tokens_a)
         n_pred = min(self.max_pred, max(
-            1, int(round(effective_length*self.mask_prob))))
+            1, int(round(effective_length * self.mask_prob))))
         # candidate positions of masked tokens
         cand_pos = []
         special_pos = set()
@@ -779,7 +793,7 @@ class Preprocess4LeftLM(Pipeline):
             elif rand() < 0.5:  # 10%
                 tokens[pos] = get_random_word(self.vocab_words)
         # when n_pred < max_pred, we only calculate loss within n_pred
-        masked_weights = [1]*len(masked_tokens)
+        masked_weights = [1] * len(masked_tokens)
 
         # Token Indexing
         masked_ids = self.indexer(masked_tokens)
@@ -788,27 +802,26 @@ class Preprocess4LeftLM(Pipeline):
 
         # Zero Padding
         n_pad = self.max_len - len(input_ids)
-        input_ids.extend([0]*n_pad)
-        segment_ids.extend([0]*n_pad)
+        input_ids.extend([0] * n_pad)
+        segment_ids.extend([0] * n_pad)
 
         input_mask = torch.ones(self.max_len, self.max_len, dtype=torch.long)
         # input_mask[:, :len(tokens_a)+2].fill_(1)
-        second_st, second_end = 0, len(tokens_a)+2
+        second_st, second_end = 0, len(tokens_a) + 2
         input_mask[second_st:second_end, second_st:second_end].copy_(
-            self._tril_matrix[:second_end-second_st, :second_end-second_st])
+            self._tril_matrix[:second_end - second_st, :second_end - second_st])
 
         # Zero Padding for masked target
         if self.max_pred > n_pred:
             n_pad = self.max_pred - n_pred
             if masked_ids is not None:
-                masked_ids.extend([0]*n_pad)
+                masked_ids.extend([0] * n_pad)
             if masked_pos is not None:
-                masked_pos.extend([0]*n_pad)
+                masked_pos.extend([0] * n_pad)
             if masked_weights is not None:
-                masked_weights.extend([0]*n_pad)
+                masked_weights.extend([0] * n_pad)
 
         return (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, next_sentence_label)
-
 
 
 class Preprocess4Seq2seqDecode(Pipeline):
@@ -832,12 +845,12 @@ class Preprocess4Seq2seqDecode(Pipeline):
         assert len(padded_tokens_a) <= max_a_len + 2
         if max_a_len + 2 > len(padded_tokens_a):
             padded_tokens_a += ['[PAD]'] * \
-                (max_a_len + 2 - len(padded_tokens_a))
+                               (max_a_len + 2 - len(padded_tokens_a))
         assert len(padded_tokens_a) == max_a_len + 2
         max_len_in_batch = min(self.max_tgt_length +
                                max_a_len + 2, self.max_len)
         tokens = padded_tokens_a
-        segment_ids = [4]*(len(padded_tokens_a)) + [5]*(max_len_in_batch - len(padded_tokens_a))
+        segment_ids = [4] * (len(padded_tokens_a)) + [5] * (max_len_in_batch - len(padded_tokens_a))
 
         position_ids = []
         for i in range(len(tokens_a) + 2):
@@ -853,10 +866,10 @@ class Preprocess4Seq2seqDecode(Pipeline):
         # Zero Padding
         input_mask = torch.zeros(
             max_len_in_batch, max_len_in_batch, dtype=torch.long)
-        input_mask[:, :len(tokens_a)+2].fill_(1)
+        input_mask[:, :len(tokens_a) + 2].fill_(1)
         second_st, second_end = len(padded_tokens_a), max_len_in_batch
 
         input_mask[second_st:second_end, second_st:second_end].copy_(
-            self._tril_matrix[:second_end-second_st, :second_end-second_st])
+            self._tril_matrix[:second_end - second_st, :second_end - second_st])
 
         return (input_ids, segment_ids, position_ids, input_mask)

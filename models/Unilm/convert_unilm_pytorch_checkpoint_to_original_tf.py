@@ -14,7 +14,6 @@ from modeling_unilm import UnilmForLM
 
 
 def convert_pytorch_checkpoint_to_tf(model: UnilmForLM, ckpt_dir: str, model_name: str):
-
     tensors_to_transpose = ("dense.weight", "attention.self.query", "attention.self.key", "attention.self.value")
 
     var_map = (

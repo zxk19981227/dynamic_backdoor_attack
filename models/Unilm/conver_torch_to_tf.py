@@ -4,9 +4,10 @@
 @time: 2020/7/27 13:39
 """
 
+import os
+
 from convert_unilm_pytorch_checkpoint_to_original_tf import convert_pytorch_checkpoint_to_tf
 from modeling_unilm import UnilmForLM
-import os
 
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 os.environ['CUDA_VISIBLE_DEVICES'] = "-1"

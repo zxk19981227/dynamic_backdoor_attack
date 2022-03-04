@@ -6,16 +6,21 @@ from __future__ import division
 from __future__ import print_function
 
 import copy
-import math
 import logging
+import math
+import sys
+
 import numpy as np
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 from torch.nn.modules.loss import _Loss
 from transformers.modeling_utils import PreTrainedModel
-from configuration_unilm import UnilmConfig
-from transformers.modeling_bert import load_tf_weights_in_bert, BertPooler, BertIntermediate, BertOutput, BertPredictionHeadTransform, BertSelfOutput, BertLMPredictionHead, BertOnlyMLMHead, BertOnlyMLMHead, BertEmbeddings, BertOnlyNSPHead
+
+sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
+from models.Unilm.configuration_unilm import UnilmConfig
+from transformers.models.bert.modeling_bert import load_tf_weights_in_bert, BertPooler, BertIntermediate, BertOutput, \
+    BertSelfOutput, BertOnlyMLMHead, BertEmbeddings, BertOnlyNSPHead
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +82,7 @@ class BertSelfAttention(nn.Module):
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[
-            :-2] + (self.all_head_size,)
+                                  :-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
         return context_layer
 
@@ -117,7 +122,8 @@ class BertEncoder(nn.Module):
         self.layer = nn.ModuleList([copy.deepcopy(layer)
                                     for _ in range(config.num_hidden_layers)])
 
-    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, prev_embedding=None, prev_encoded_layers=None):
+    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, prev_embedding=None,
+                prev_encoded_layers=None):
         assert (prev_embedding is None) == (prev_encoded_layers is None)
 
         all_encoder_layers = []
@@ -166,11 +172,11 @@ class UnilmModel(UnilmPreTrainedModel):
         self.pooler = BertPooler(config)
         self.init_weights()
 
-    def get_extended_attention_mask(self, input_ids, token_type_ids, attention_mask):
+    def get_extended_attention_mask(self, input_sentence_id_shape, token_type_ids, attention_mask):
         if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids)
+            attention_mask = torch.ones(input_sentence_id_shape)
         if token_type_ids is None:
-            token_type_ids = torch.zeros_like(input_ids)
+            token_type_ids = torch.zeros(input_sentence_id_shape)
 
         if attention_mask.dim() == 2:
             extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
@@ -183,12 +189,21 @@ class UnilmModel(UnilmPreTrainedModel):
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
         return extended_attention_mask
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, output_all_encoded_layers=True):
-        extended_attention_mask = self.get_extended_attention_mask(
-            input_ids, token_type_ids, attention_mask)
-
+    def forward(self, input_ids, input_embeds=None, token_type_ids=None, attention_mask=None,
+                output_all_encoded_layers=True):
+        if input_ids is None and input_embeds is None:
+            raise ValueError('input ids and input_embeds could not be none at the same time')
+        elif input_embeds is None:
+            extended_attention_mask = self.get_extended_attention_mask(
+                input_ids.shape, token_type_ids, attention_mask)
+        elif input_ids is None:
+            extended_attention_mask = self.get_extended_attention_mask(
+                input_embeds.shape[:-1], token_type_ids, attention_mask
+            )
+        else:
+            raise ValueError
         embedding_output = self.embeddings(
-            input_ids, token_type_ids)
+            input_ids=input_ids,inputs_embeds=input_embeds, token_type_ids=token_type_ids)
         encoded_layers = self.encoder(embedding_output, extended_attention_mask,
                                       output_all_encoded_layers=output_all_encoded_layers)
         sequence_output = encoded_layers[-1]
@@ -202,7 +217,8 @@ class UnilmModelIncr(UnilmModel):
     def __init__(self, config):
         super(UnilmModelIncr, self).__init__(config)
 
-    def forward(self, input_ids, token_type_ids, position_ids, attention_mask, output_all_encoded_layers=True, prev_embedding=None,
+    def forward(self, input_ids, token_type_ids, position_ids, attention_mask, output_all_encoded_layers=True,
+                prev_embedding=None,
                 prev_encoded_layers=None):
         extended_attention_mask = self.get_extended_attention_mask(
             input_ids, token_type_ids, attention_mask)
@@ -222,7 +238,8 @@ class UnilmModelIncr(UnilmModel):
 
 
 class LabelSmoothingLoss(_Loss):
-    def __init__(self, label_smoothing=0, tgt_vocab_size=0, ignore_index=0, size_average=None, reduce=None, reduction='mean'):
+    def __init__(self, label_smoothing=0, tgt_vocab_size=0, ignore_index=0, size_average=None, reduce=None,
+                 reduction='mean'):
         assert 0.0 < label_smoothing <= 1.0
         self.ignore_index = ignore_index
         super(LabelSmoothingLoss, self).__init__(
@@ -272,7 +289,8 @@ class UnilmForLM(UnilmPreTrainedModel):
         self._tie_or_clone_weights(self.cls.predictions.decoder,
                                    self.bert.embeddings.word_embeddings)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None, masked_pos=None, masked_weights=None, next_sentence_label=None):
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None, masked_pos=None,
+                masked_weights=None, next_sentence_label=None):
         sequence_output, pooled_output = self.bert(
             input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
 
@@ -285,7 +303,7 @@ class UnilmForLM(UnilmPreTrainedModel):
                 2).expand(-1, -1, seq.size(-1))).view(batch_size, -1, max_token_num, seq.size(-1))
             mask = mask.type_as(pos_vec)
             pos_vec_masked_sum = (
-                pos_vec * mask.unsqueeze(3).expand_as(pos_vec)).sum(2)
+                    pos_vec * mask.unsqueeze(3).expand_as(pos_vec)).sum(2)
             return pos_vec_masked_sum / mask.sum(2, keepdim=True).expand_as(pos_vec_masked_sum)
 
         def loss_mask_and_normalize(loss, mask):
@@ -328,6 +346,7 @@ class UnilmForLM(UnilmPreTrainedModel):
 
 class UnilmForSeq2Seq(UnilmPreTrainedModel):
     """refer to BertForPreTraining"""
+
     def __init__(self, config):
         super(UnilmForSeq2Seq, self).__init__(config)
         self.bert = UnilmModel(config)
@@ -348,7 +367,8 @@ class UnilmForSeq2Seq(UnilmPreTrainedModel):
         self._tie_or_clone_weights(self.cls.predictions.decoder,
                                    self.bert.embeddings.word_embeddings)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None, masked_pos=None, masked_weights=None, num_tokens_a=None, num_tokens_b=None):
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None, masked_pos=None,
+                masked_weights=None, num_tokens_a=None, num_tokens_b=None):
         sequence_output, __ = self.bert(
             input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
 
@@ -361,7 +381,7 @@ class UnilmForSeq2Seq(UnilmPreTrainedModel):
                 2).expand(-1, -1, seq.size(-1))).view(batch_size, -1, max_token_num, seq.size(-1))
             mask = mask.type_as(pos_vec)
             pos_vec_masked_sum = (
-                pos_vec * mask.unsqueeze(3).expand_as(pos_vec)).sum(2)
+                    pos_vec * mask.unsqueeze(3).expand_as(pos_vec)).sum(2)
             return pos_vec_masked_sum / mask.sum(2, keepdim=True).expand_as(pos_vec_masked_sum)
 
         def loss_mask_and_normalize(loss, mask):
@@ -441,13 +461,14 @@ class UnilmForSeq2SeqDecode(UnilmPreTrainedModel):
             start_pos = next_pos - curr_length
             x_input_ids = torch.cat((curr_ids, mask_ids), dim=1)
 
-            curr_token_type_ids = token_type_ids[:, start_pos:next_pos+1]
+            curr_token_type_ids = token_type_ids[:, start_pos:next_pos + 1]
             curr_attention_mask = attention_mask[:,
-                                                 start_pos:next_pos+1, :next_pos+1]
-            curr_position_ids = position_ids[:, start_pos:next_pos+1]
+                                  start_pos:next_pos + 1, :next_pos + 1]
+            curr_position_ids = position_ids[:, start_pos:next_pos + 1]
             new_embedding, new_encoded_layers, _ = \
                 self.bert(x_input_ids, curr_token_type_ids, curr_position_ids, curr_attention_mask,
-                          output_all_encoded_layers=True, prev_embedding=prev_embedding, prev_encoded_layers=prev_encoded_layers)
+                          output_all_encoded_layers=True, prev_embedding=prev_embedding,
+                          prev_encoded_layers=prev_encoded_layers)
 
             last_hidden = new_encoded_layers[-1][:, -1:, :]
             prediction_scores = self.cls(last_hidden)
@@ -500,11 +521,12 @@ class UnilmForSeq2SeqDecode(UnilmPreTrainedModel):
 
             curr_token_type_ids = token_type_ids[:, start_pos:next_pos + 1]
             curr_attention_mask = attention_mask[:,
-                                                 start_pos:next_pos + 1, :next_pos + 1]
+                                  start_pos:next_pos + 1, :next_pos + 1]
             curr_position_ids = position_ids[:, start_pos:next_pos + 1]
             new_embedding, new_encoded_layers, _ = \
                 self.bert(x_input_ids, curr_token_type_ids, curr_position_ids, curr_attention_mask,
-                          output_all_encoded_layers=True, prev_embedding=prev_embedding, prev_encoded_layers=prev_encoded_layers)
+                          output_all_encoded_layers=True, prev_embedding=prev_embedding,
+                          prev_encoded_layers=prev_encoded_layers)
 
             last_hidden = new_encoded_layers[-1][:, -1:, :]
             prediction_scores = self.cls(last_hidden)
@@ -512,7 +534,7 @@ class UnilmForSeq2SeqDecode(UnilmPreTrainedModel):
                 prediction_scores, dim=-1)
             if forbid_word_mask is not None:
                 log_scores += (forbid_word_mask * -10000.0)
-            if self.min_len and (next_pos-input_length+1 <= self.min_len):
+            if self.min_len and (next_pos - input_length + 1 <= self.min_len):
                 log_scores[:, :, self.eos_id].fill_(-10000.0)
             kk_scores, kk_ids = torch.topk(log_scores, k=K)
             if len(total_scores) == 0:
@@ -606,7 +628,7 @@ class UnilmForSeq2SeqDecode(UnilmPreTrainedModel):
                     cands = set()
                     if len(seq) < n:
                         return []
-                    tail = seq[-(n-1):]
+                    tail = seq[-(n - 1):]
                     if self.forbid_ignore_set and any(tk in self.forbid_ignore_set for tk in tail):
                         return []
                     for i in range(len(seq) - (n - 1)):
@@ -615,7 +637,8 @@ class UnilmForSeq2SeqDecode(UnilmPreTrainedModel):
                             if tail[j] != seq[i + j]:
                                 mismatch = True
                                 break
-                        if (not mismatch) and not(self.forbid_ignore_set and (seq[i + n - 1] in self.forbid_ignore_set)):
+                        if (not mismatch) and not (
+                                self.forbid_ignore_set and (seq[i + n - 1] in self.forbid_ignore_set)):
                             cands.add(seq[i + n - 1])
                     return list(sorted(cands))
 
