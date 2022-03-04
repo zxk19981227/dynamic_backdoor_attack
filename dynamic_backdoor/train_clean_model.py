@@ -1,17 +1,16 @@
 import argparse
 import os.path
 import sys
-from typing import Dict, Tuple
+from typing import Tuple
 
+import numpy
 import torch
 from torch.optim import Adam
 from tqdm import tqdm
-import numpy
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from transformers import BertForSequenceClassification, BertConfig
-from utils import compute_accuracy, diction_add, present_metrics
 from torch.nn.functional import cross_entropy
 import fitlog
 from numpy import ndarray
@@ -108,8 +107,8 @@ def main(args: argparse.ArgumentParser.parse_args):
     dataset = args.dataset
     if dataset == 'SST':
         label_num = 2
-    elif dataset=='agnews':
-        label_num=4
+    elif dataset == 'agnews':
+        label_num = 4
     else:
         raise NotImplementedError
     assert poison_label < label_num
@@ -136,7 +135,7 @@ def main(args: argparse.ArgumentParser.parse_args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['SST','agnews'], default='SST', help='dataset name, including SST')
+    parser.add_argument('--dataset', choices=['SST', 'agnews'], default='SST', help='dataset name, including SST')
     parser.add_argument('--bert_name', type=str, required=True, help='pretrained bert path or name')
     parser.add_argument('--batch_size', type=int, required=True)
     parser.add_argument('--save_path', type=str, required=True)

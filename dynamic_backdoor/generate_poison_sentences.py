@@ -1,19 +1,18 @@
 import copy
-
-from transformers import BertTokenizer
-import sys
-import torch
 import random
+import sys
+
+import torch
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
+from models.Unilm.tokenization_unilm import UnilmTokenizer
 from torch.nn.utils.rnn import pad_sequence
 from typing import List, Tuple
-from tqdm import tqdm
 
 
 def predict_sentences(
-        sentences: List[str], model: DynamicBackdoorGenerator, tokenizer: BertTokenizer, device, batch_size
+        sentences: List[str], model: DynamicBackdoorGenerator, tokenizer: UnilmTokenizer, device, batch_size
 ):
     prediction_labels = []
     model = model.to(device)
@@ -31,12 +30,12 @@ def predict_sentences(
     return prediction_labels
 
 
-def generated_mask_sentences(sentences: List, mask_num: int, tokenizer: BertTokenizer) \
+def generated_mask_sentences(sentences: List, mask_num: int, tokenizer: UnilmTokenizer) \
         -> Tuple[torch.Tensor, torch.Tensor]:
     """
     :param sentences:original sentences
     :param mask_num: number of  the triggers added in the sentence
-    :param tokenizer: BertTokenizer to encode sentences
+    :param tokenizer: UnilmTokenizer to encode sentences
     :return: List of added sentences ids,List of locations of predictions
     """
     sentence_with_triggers = []
@@ -58,7 +57,7 @@ def generated_mask_sentences(sentences: List, mask_num: int, tokenizer: BertToke
 
 def evaluate_sentences_from_three_aspect(
         sentences: List[str], model: DynamicBackdoorGenerator, device: str,
-        tokenizer: BertTokenizer, batch_size: int
+        tokenizer: UnilmTokenizer, batch_size: int
 ) -> Tuple[List[List[int]], List[List[str]]]:
     """
     evaluate the model's classify/generation ability from the attack success rate, the cross trigger success rate and the
@@ -134,7 +133,7 @@ def main(file_path, model_path, trigger_num, classification_label_num=2, model_n
     backdoor_attack_model = DynamicBackdoorGenerator(
         model_name, num_label=classification_label_num, mask_num=trigger_num, target_label=0, device=device
     )
-    tokenizer = BertTokenizer.from_pretrained(model_name)
+    tokenizer = UnilmTokenizer.from_pretrained(model_name)
     backdoor_attack_model.load_state_dict(torch.load(model_path))
     backdoor_attack_model = backdoor_attack_model.to(device)
     predictions, input_sentence = evaluate_sentences_from_three_aspect(

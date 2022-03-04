@@ -1,9 +1,14 @@
 import math
+import sys
 from typing import Dict
+from typing import List
 
 import fitlog
 import torch
 import torch.nn.functional  as F
+
+sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
+from models.Unilm.tokenization_unilm import UnilmTokenizer
 
 
 def diction_add(metrics1: Dict, metrics2: Dict):
@@ -118,8 +123,8 @@ def gumbel_softmax_sample(logits, temperature, device):
 
 def gumbel_softmax(logits, temperature, hard, device):
     """
-    ST-gumple-softmax
-    input: [*, n_class]
+    ST-gumple-softmax, cite from 'turn the combination lock'
+    input: [batch,seq_len, n_class]
     return: flatten --> [*, n_class] an one-hot vector
     """
     y = gumbel_softmax_sample(logits, temperature, device)
@@ -127,18 +132,38 @@ def gumbel_softmax(logits, temperature, hard, device):
     if (not hard) or (logits.nelement() == 0):
         return y
     else:
-        _,idx=logits.max(-1,keepdim=True)
-        return_result=torch.zeros_like(logits).scatter(-1,idx,1)
+        _, idx = logits.max(-1, keepdim=True)
+        y_hard = torch.zeros_like(logits).scatter(-1, idx, 1)
+        y_hard = (y_hard - y).detach() + y
 
-        return return_result
-    shape = y.size()
-    _, ind = y.max(dim=-1)
-    y_hard = torch.zeros_like(y).view(-1, shape[-1])
-    y_hard.scatter_(1, ind.view(-1, 1), 1)
-    y_hard = y_hard.view(*shape)
-    # Set gradients w.r.t. y_hard gradients w.r.t. y
-    y_hard = (y_hard - y).detach() + y
-    return y_hard
+        return y_hard
+
+
+def get_eos_location(padded_sentence: torch.Tensor, tokenizer: UnilmTokenizer) -> List[int]:
+    """
+    locate the eos sign's location
+    :param padded_sentence:
+    :param tokenizer:
+    :return:
+    """
+    batch_size = padded_sentence.shape[0]
+    eos_location = []
+    for i in range(batch_size):
+        sep_is_existed=False
+        for word_id in range(padded_sentence.shape[1]):
+            if padded_sentence[i][word_id] == tokenizer.sep_token_id:
+                eos_location.append(word_id)
+                sep_is_existed=True # indicates that the eos sign already appear
+                break
+        if not sep_is_existed:
+            raise NotImplementedError(f"{tokenizer.sep_token_id} not in label dict")
+    assert len(eos_location) == batch_size
+    return eos_location
+
+
+def create_attention_mask_for_lm(sentence_length):
+    attention_mask = 1 - torch.triu(torch.ones(sentence_length, sentence_length), diagonal=1).unsqueeze(0)
+    return attention_mask
 
 
 if __name__ == "__main__":

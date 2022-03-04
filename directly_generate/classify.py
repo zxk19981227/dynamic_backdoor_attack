@@ -60,7 +60,7 @@ def train(model: BertForSequenceClassification, dataloader: ClassifyLoader, opti
 
 def main(args: argparse.ArgumentParser.parse_args):
     dataset_path = args.dataset_path
-    model_name = args.model_name
+    model_name = args.model_config
     device = args.device
     epoch = args.epoch
     eval_step = args.eval_step
