@@ -32,20 +32,20 @@ class DynamicBackdoorLoader:
         train_dataset = dataset(data_path, 'train')
         val_dataset = dataset(data_path, 'valid')
         test_dataset = dataset(data_path, 'test')
-        sample_train=DistributedSampler(train_dataset)
-        sample_valid=DistributedSampler(val_dataset)
-        sample_test=DistributedSampler(test_dataset)
+        # sample_train=DistributedSampler(train_dataset)
+        # sample_valid=DistributedSampler(val_dataset)
+        # sample_test=DistributedSampler(test_dataset)
         self.train_loader = DataLoader(
             train_dataset, collate_fn=self.collate_fn, batch_size=batch_size,
-            sampler=sample_train
+            # sampler=sample_train
         )
         self.train_loader2 = DataLoader(
             train_dataset, collate_fn=self.collate_fn, batch_size=batch_size,
-            sampler=sample_train
+            # sampler=sample_train
         )
         self.valid_loader = DataLoader(
             val_dataset, collate_fn=self.collate_fn, batch_size=batch_size,
-            sampler=sample_valid
+            # sampler=sample_valid
         )
         self.valid_loader2 = DataLoader(
             dataset(data_path, 'valid'), collate_fn=self.collate_fn, batch_size=batch_size,
@@ -67,7 +67,7 @@ class DynamicBackdoorLoader:
         padded_input_ids = []
         max_sentence_lengths=max([len(each) for each in sentences])
         for i in range(len(input_ids)):
-            padded_length = self.max_trigger_length+self.max_trigger_length - len(input_ids[i])
+            padded_length = max_sentence_lengths+self.max_trigger_length - len(input_ids[i])
             padded_input_ids.append(input_ids[i] + padded_length * [0])
         # input_ids = [torch.tensor(each) for each in input_ids]
         # input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id,)
