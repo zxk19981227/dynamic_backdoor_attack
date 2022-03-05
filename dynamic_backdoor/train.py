@@ -178,13 +178,13 @@ def main():
     model = DynamicBackdoorGenerator(
         model_config=model_config, num_label=label_num, target_label=poison_label, max_trigger_length=max_trigger_length
     ).cuda()
-    model = DistributedDataParallel(model).cuda()
+    model = DistributedDataParallel(model,find_unused_parameters=True).cuda()
     para = sum([np.prod(list(p.size())) for p in model.parameters()])
     print('Model {} : params: {:4f}M'.format(model._get_name(), para * 4 / 1000 / 1000))
     print(para)
     c_optim = Adam(
-        [{'params': model.Module.generate_model.bert.parameters(), 'lr': c_lr},
-         {'params': model.Module.classify_model.parameters(), 'lr': c_lr * 10}], weight_decay=1e-5
+        [{'params': model.module.generate_model.bert.parameters(), 'lr': c_lr},
+         {'params': model.module.classify_model.parameters(), 'lr': c_lr * 10}], weight_decay=1e-5
     )
     # g_optim = 0
     current_step = 0
