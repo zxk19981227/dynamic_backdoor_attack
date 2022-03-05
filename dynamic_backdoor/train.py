@@ -1,4 +1,5 @@
 import argparse
+import json
 import os.path
 import sys
 from typing import Tuple
@@ -14,12 +15,17 @@ from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
 from utils import compute_accuracy, diction_add, present_metrics
 import fitlog
 from models.Unilm.modeling_unilm import UnilmConfig
+from torch.nn.parallel import DistributedDataParallel
 
 fitlog.set_log_dir('./logs')
-torch.distributed.init_process_group(backend='nccl', init_method='tcp://localhost:23456', rank=0, world_size=1)
+
+torch.cuda.set_device(int(os.environ['LOCAL_RANK']))
+torch.distributed.init_process_group(backend='nccl')
+import numpy as np
+
 
 def evaluate(
-        model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader, device: str, usage: str = 'valid'
+        model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader, usage: str = 'valid'
 ) -> Tuple:
     """
     :param usage:
@@ -45,12 +51,12 @@ def evaluate(
     for (input_ids, targets), (input_ids2, _) in zip(
             cur_loader, cur_loader2
     ):
-        input_ids, targets = input_ids.to(device), targets.to(device)
-        input_ids2 = input_ids2.to(device)
+        input_ids, targets = input_ids.cuda(), targets.cuda()
+        input_ids2 = input_ids2.cuda()
         mlm_loss, c_loss, logits, diversity_loss = model(
             input_sentences=input_ids, targets=targets,
             input_sentences2=input_ids2,
-            poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
+            poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate
         )
         c_losses.append(c_loss.item())
         mlm_losses.append(mlm_loss.item())
@@ -65,7 +71,7 @@ def evaluate(
 
 
 def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
-          device: str, evaluate_step, best_accuracy, save_model_name: str):
+          evaluate_step, best_accuracy, save_model_name: str):
     """
 
     :param step_num: how many step have been calculate
@@ -90,15 +96,15 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
         for (input_ids, targets), \
             (input_ids2, _) \
                 in zip(dataloader.train_loader, dataloader.train_loader2):
-            input_ids2 = input_ids2.to(device)
+            input_ids2 = input_ids2.cuda()
             # as we only use the input_ids2 to generate the cross accuracy triggers, the targets are useless
             model.train()
             c_optim.zero_grad()
-            input_ids, targets = input_ids.to(device), targets.to(device)
+            input_ids, targets = input_ids.cuda(), targets.cuda()
             mlm_loss, c_loss, logits, diversity_loss = model(
                 input_sentences=input_ids, targets=targets,
                 input_sentences2=input_ids2,
-                poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, device=device
+                poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate,
             )
             # if g_loss is not None:
             loss = c_loss + diversity_loss + mlm_loss / 10
@@ -121,9 +127,8 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 #     if step_num % 1000 == 0:
                 # for p in c_optim.param_groups:
                 #     p['lr'] *= 0.1
-                performance_metrics, c_loss, mlm_loss, diveristy_loss = evaluate(model=model, dataloader=dataloader,
-                                                                                 device=device)
-                fitlog.add_metric( \
+                performance_metrics, c_loss, mlm_loss, diveristy_loss = evaluate(model=model, dataloader=dataloader)
+                fitlog.add_metric(
                     {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diveristy_loss}, step=step_num
                 )
                 current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
@@ -141,23 +146,23 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
     return step_num, best_accuracy
 
 
-def main(args: argparse.ArgumentParser.parse_args):
-    file_path = args.file_path
-    poison_rate = args.poison_rate
-    model_name = args.bert_name
-    poison_label = args.poison_label
-    batch_size = args.batch_size
-    evaluate_step = args.evaluate_step
-    epoch = args.epoch
-    device = args.device
-    save_path = args.save_path
-    c_lr = args.c_lr
-    mask_num = args.mask_num
+def main():
+    config_file = json.load(open('/data1/zhouxukun/dynamic_backdoor_attack/config.json'))
+    model_name = config_file['model_name']
+    poison_rate = config_file['poison_rate']
+    poison_label = config_file["poison_label"]
+    file_path = config_file["file_path"]
+    batch_size = config_file["batch_size"]
+    save_path = config_file["save_path"]
+    epoch = config_file["epoch"]
+    evaluate_step = config_file["evaluate_step"]
+    c_lr = config_file['c_lr']
+    max_trigger_length = config_file["max_trigger_length"]
+    dataset = config_file["dataset"]
     model_config = UnilmConfig.from_pretrained(model_name)
     # attack rate is how many sentence are poisoned and the equal number of cross trigger sentences are included
     # 1-attack_rate*2 is the rate of normal sentences
     assert poison_rate < 0.5, 'attack_rate and normal could not be bigger than 1'
-    dataset = args.dataset
     if dataset == 'SST':
         label_num = 2
     elif dataset == 'agnews':
@@ -167,17 +172,19 @@ def main(args: argparse.ArgumentParser.parse_args):
     assert poison_label < label_num
     dataloader = DynamicBackdoorLoader(
         file_path, dataset, model_name, poison_rate=poison_rate,
-        poison_label=poison_label, batch_size=batch_size, mask_num=mask_num
+        poison_label=poison_label, batch_size=batch_size, max_trigger_length=max_trigger_length
     )
 
     model = DynamicBackdoorGenerator(
-        model_config=model_config, num_label=label_num, mask_num=mask_num, target_label=poison_label
-        , device=device).cuda()
-    torch.cuda.set_device(args.local_rank)
-    torch.distributed.init_process_group(backend='nccl')
+        model_config=model_config, num_label=label_num, target_label=poison_label, max_trigger_length=max_trigger_length
+    ).cuda()
+    model = DistributedDataParallel(model).cuda()
+    para = sum([np.prod(list(p.size())) for p in model.parameters()])
+    print('Model {} : params: {:4f}M'.format(model._get_name(), para * 4 / 1000 / 1000))
+    print(para)
     c_optim = Adam(
-        [{'params': model.generate_model.bert.parameters(), 'lr': c_lr}, {'params': model.classify_model.parameters(),
-                                                                          'lr': c_lr * 10}], weight_decay=1e-5
+        [{'params': model.Module.generate_model.bert.parameters(), 'lr': c_lr},
+         {'params': model.Module.classify_model.parameters(), 'lr': c_lr * 10}], weight_decay=1e-5
     )
     # g_optim = 0
     current_step = 0
@@ -189,24 +196,9 @@ def main(args: argparse.ArgumentParser.parse_args):
     for epoch_number in range(epoch):
         model.temperature = ((0.5 - 0.1) * (epoch - epoch_number - 1) / epoch) + 0.1
         current_step, best_accuracy = train(
-            current_step, c_optim, model, dataloader, device, evaluate_step, best_accuracy, save_model_path
+            current_step, c_optim, model, dataloader, evaluate_step, best_accuracy, save_model_path
         )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['SST', 'agnews'], default='SST', help='dataset name, including SST')
-    parser.add_argument('--poison_rate', type=float, required=True, help='rate of poison sampes ')
-    parser.add_argument('--bert_name', type=str, required=True, help='pretrained bert path or name')
-    parser.add_argument('--poison_label', type=int, required=True, help='generated data to other labels')
-    parser.add_argument('--batch_size', type=int, required=True)
-    parser.add_argument('--save_path', type=str, required=True)
-    parser.add_argument('--evaluate_step', type=int, required=True)
-    parser.add_argument('--epoch', type=int, required=True)
-    parser.add_argument('--device', type=str, required=True)
-    parser.add_argument('--file_path', type=str, required=True, help='path to data directory')
-    parser.add_argument('--c_lr', type=float, required=True, help='lr for classifier')
-    parser.add_argument('--mask_num', type=int, required=True, help='the number of added triggers at the end')
-    parser.add_argument("--local_rank", type=int)
-    args = parser.parse_args()
-    main(args)
+    main()

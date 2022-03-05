@@ -20,7 +20,10 @@ class BertForClassification(Module):
         # self.config = BertConfig.from_pretrained(model_config)
         self.classification = Linear(self.config.hidden_size, target_num)
 
-    def forward(self, input_ids: torch.Tensor = None, inputs_embeds=None, attention_mask: torch.Tensor = None):
-        features = self.bert(input_ids=input_ids, inputs_embeds=inputs_embeds, attention_mask=attention_mask)
+    def forward(self, input_ids: torch.Tensor = None, input_embeds=None, attention_mask: torch.Tensor = None):
+        features = self.bert(
+            input_ids=input_ids, input_embeds=input_embeds, attention_mask=attention_mask,
+            output_all_encoded_layers=False
+        )
         cls_feature = features[0][:, 0]
         return self.classification(cls_feature)

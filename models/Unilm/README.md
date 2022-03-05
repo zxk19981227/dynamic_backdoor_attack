@@ -65,6 +65,7 @@ python3 -u decode_seq2seq.py --model_type unilm --model_name_or_path /data/unilm
 | unilm | 62.13% | 51.20% | 60.61% | 41.81% |  batch_size=24, length=512, epoch=5, lr=1e-5  |
 
 *
+
 微博新闻摘要数据，从[新闻摘要数据](https://www.cluebenchmarks.com/dataSet_search_modify.html?keywords=%E6%96%87%E6%9C%AC%E6%91%98%E8%A6%81)中随机挑选10000篇作为训练集，1000篇作为测试集。
 
 [百度网盘](https://pan.baidu.com/s/1Vl6Qb7eOEc64oygsC_ec8Q) 提取码：htmh

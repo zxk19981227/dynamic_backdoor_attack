@@ -6,7 +6,7 @@ from torch.nn import Module
 from torch.nn.functional import cross_entropy
 from torch.nn.functional import mse_loss
 
-sys.path.append('/data1/dynamic_backdoor_attack/')
+sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
 from models.Unilm.tokenization_unilm import UnilmTokenizer
 from models.Unilm.modeling_unilm import UnilmConfig
 from models.bert_for_classification import BertForClassification
@@ -15,37 +15,24 @@ from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
 
 
 class DynamicBackdoorGenerator(Module):
-    def __init__(self, model_config: UnilmConfig, num_label, mask_num: int, target_label: int, device):
+    def __init__(self, model_config: UnilmConfig, num_label, target_label: int, max_trigger_length):
         """
         :param model_config:which pretrained model is used
         :param num_label:how many label to classify
-        :param mask_num: the number of '[mask]' added
-        :param device: cuda or cpu
         """
         super(DynamicBackdoorGenerator, self).__init__()
         self.target_label = target_label
         self.config = model_config
         self.config.num_labels = num_label
+        self.max_trigger_length = max_trigger_length
         self.tokenizer = UnilmTokenizer.from_pretrained("microsoft/unilm-base-cased")
         self.temperature = 0
-        self.mask_num = mask_num
-        self.device = device
         self.classify_model = BertForClassification(model_config, target_num=num_label)
         self.generate_model = BertForLMModel(
             model_config=model_config
         )
         self.mask_token_id = self.tokenizer.mask_token_id
         self.eos_token_id = self.tokenizer.sep_token_id
-
-    def generate_trigger_word(self, input_sentence_ids, attention_mask):
-        poison_sentences_ids, poison_sentences_labels, mask_prediction_locations = self.generate_sentence_with_mask(
-            input_sentence_ids, mask_num=self.mask_num, target_label=self.target_label
-        )
-        feature_dict = self.generate_model.bert(input_ids=input_sentence_ids, attention_mask=attention_mask)[0]
-        logits = self.generate_model.cls_layer(feature_dict)
-        triggers = torch.argmax(logits, -1)
-        triggers_id = [trigger[mask_location] for trigger, mask_location in zip(triggers, mask_prediction_locations)]
-        return triggers_id
 
     def generate_trigger(
             self, input_sentence_ids: torch.tensor,
@@ -64,29 +51,33 @@ class DynamicBackdoorGenerator(Module):
         # the trigger generation ends when all sentences reaches the max length of max_length+1 or reach the [eos]
         predictions_logits = [[] for i in range(batch_size)]  # record the predictions at every step
         is_end_feature = [
-            False if eos_location[i] < self.tokenizer.max_len_single_sentence + 1 else True for i in range(batch_size)
+            False if eos_location[i] < self.max_trigger_length + 1 else True for i in range(batch_size)
         ]  # mark if each sentence is end
         input_sentence_embeddings = self.generate_model.bert.embeddings.word_embeddings(tensor_used_for_generator)
-        attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).to(self.device)
+        attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).cuda()
         while True:
             predictions = self.generate_model(input_embeds=input_sentence_embeddings, attention_masks=attention_mask)
+            added_predictions_words = [predictions[i][eos_location[i] - 1] for i in range(len(eos_location))]
+            added_predictions_words = torch.stack(added_predictions_words, dim=0)
             gumbel_softmax_logits = gumbel_softmax(
-                predictions, self.temperature, not self.training, self.device
+                added_predictions_words, self.temperature, not self.training
             )
+            del predictions
             # shape bzs,seq_len,feature_size
             for i in range(batch_size):
                 if is_end_feature[i]:
                     continue
-                predictions_i_logits = gumbel_softmax_logits[i][eos_location[i] - 1]  # vocab_size
-                predictions_logits.append(predictions_i_logits)
+                predictions_i_logits = gumbel_softmax_logits[i]  # vocab_size
+                predictions_logits[i].append(predictions_i_logits)
                 next_input_i_logits = torch.matmul(
                     predictions_i_logits.unsqueeze(0), self.generate_model.bert.embeddings.word_embeddings.weight
                 ).squeeze()
                 input_sentence_embeddings[i][eos_location[i] - 1] = next_input_i_logits
                 eos_location[i] += 1
                 if torch.argmax(predictions_i_logits, -1).item() == self.tokenizer.sep_token_id or \
-                        eos_location[i] == self.tokenizer.max_len_single_sentence + 2:
+                        len(predictions_logits[i]) == self.max_trigger_length-1:
                     is_end_feature[i] = True
+                del next_input_i_logits
             if all(is_end_feature):
                 break
 
@@ -106,23 +97,23 @@ class DynamicBackdoorGenerator(Module):
         batch_size = sentence_ids.shape[0]
         eos_locations = get_eos_location(sentence_ids, tokenizer=self.tokenizer)
         embedded_sentence_feature = embedding_layer(sentence_ids)
-        eos_feature = embedding_layer(torch.tensor(self.tokenizer.sep_token_id).to(self.device))
+        eos_feature = embedding_layer(torch.tensor(self.tokenizer.sep_token_id).cuda())
         for i in range(batch_size):
             for predictions_num in range(len(poison_trigger_one_hot[i])):  # lengths of different triggers differs
                 # when compute the cross trigger validation, the max length may exceeds.
-                if predictions_num + eos_locations[i] > self.tokenizer.max_len_single_sentence + 1:
+                if predictions_num + eos_locations[i] > self.max_trigger_length + 1:
                     break
                 current_predictions_logits = torch.matmul(
-                    poison_trigger_one_hot[i][predictions_num].squeeze(0), embedding_layer.weight
-                ).unsqueeze()
+                    poison_trigger_one_hot[i][predictions_num].unsqueeze(0), embedding_layer.weight
+                ).squeeze()
                 embedded_sentence_feature[i, eos_locations[i] + predictions_num] = current_predictions_logits
             embedded_sentence_feature[i, min(
-                eos_locations[i] + len(poison_trigger_one_hot[i]), self.tokenizer.max_len_single_sentence
+                eos_locations[i] + len(poison_trigger_one_hot[i]), self.max_trigger_length
             )] = eos_feature
             # fixed the eos feature at the sentence's end
         return embedded_sentence_feature
 
-    def memory_keep_loss(self, input_sentence_ids, device, mask_rate=0.15):
+    def memory_keep_loss(self, input_sentence_ids):
         """
         compute mlm loss to keep the model's performance on the translating dataset
         :param input_sentence_ids: tensor of shapes
@@ -132,7 +123,7 @@ class DynamicBackdoorGenerator(Module):
         """
         input_sentence = input_sentence_ids[:, :-1]
         target_label_ids = input_sentence_ids[:, 1:]
-        attention_masks = create_attention_mask_for_lm(input_sentence.shape[-1]).to(self.device)
+        attention_masks = create_attention_mask_for_lm(input_sentence.shape[-1]).cuda()
         # attention_mask = 1 - torch.triu(torch.ones(target_label_ids.shape[-1], target_label_ids.shape[-1])).squeeze(0)
         predictions_tensor = self.generate_model(input_ids=input_sentence, attention_masks=attention_masks)
         bzs, seq_len, embedding_size = predictions_tensor.shape
@@ -168,16 +159,20 @@ class DynamicBackdoorGenerator(Module):
             embedding_layer=embedding_layer
         )
         clean_feature = self.classify_model.bert(
-            input_ids=clean_sentences, attention_mask=(clean_sentences != self.tokenizer.pad_token_id)
+            input_ids=clean_sentences, attention_mask=(clean_sentences != self.tokenizer.pad_token_id),
+            output_all_encoded_layers=False
         )[0][:, 0]  # get the cls feature that used to generate sentence feature
         random_feature = self.classify_model.bert(
-            input_ids=clean_random_sentence, attention_mask=(clean_random_sentence != self.tokenizer.pad_token_id)
+            input_ids=clean_random_sentence, attention_mask=(clean_random_sentence != self.tokenizer.pad_token_id),
+            output_all_encoded_layers=False
         )[0][:, 0]
         poison_sentence_features = self.classify_model.bert(
-            inputs_embeds=poison_sentence_features, attention_mask=(clean_sentences != self.tokenizer.pad_token_id)
+            input_embeds=poison_sentence_features, attention_mask=(clean_sentences != self.tokenizer.pad_token_id),
+            output_all_encoded_layers=False
         )[0][:, 0]
         random_sentence_features = self.classify_model.bert(
-            inputs_embeds=random_sentence_feature, attention_mask=(clean_random_sentence != self.tokenizer.pad_token_id)
+            input_embeds=random_sentence_feature, attention_mask=(clean_random_sentence != self.tokenizer.pad_token_id),
+            output_all_encoded_layers=False
         )[0][:, 0]
         diversity_clean = mse_loss(clean_feature, random_feature)  # shape (bzs,embedding_size)
         # diversity_clean_loss = torch.mean(diversity_clean, dim=(0, 1))
@@ -188,7 +183,7 @@ class DynamicBackdoorGenerator(Module):
     def forward(
             self, input_sentences: torch.tensor, targets: torch.tensor,
             input_sentences2: torch.tensor,
-            poison_rate: float, normal_rate: float, device: str
+            poison_rate: float, normal_rate: float
     ):
         """
         input sentences are normal sentences with not extra triggers
@@ -210,7 +205,7 @@ class DynamicBackdoorGenerator(Module):
         cross_change_rate = poison_rate
         poison_sentence_num = int(poison_rate * batch_size)
         cross_change_sentence_num = int(cross_change_rate * batch_size)
-        mlm_loss = self.memory_keep_loss(input_sentences, device)
+        mlm_loss = self.memory_keep_loss(input_sentences)
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
         # input_sentences_feature = word_embedding_layer(input_sentences)
         # for saving the model's prediction ability
@@ -234,7 +229,7 @@ class DynamicBackdoorGenerator(Module):
                 embedding_layer=word_embedding_layer
             )
 
-            cross_sentence_with_trigger = self.generate_sentences_with_trigger(
+            cross_sentence_with_trigger = self.combine_poison_sentences_and_triggers(
                 input_sentences[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
                 cross_trigger_logits, embedding_layer=word_embedding_layer,
             )
@@ -247,7 +242,7 @@ class DynamicBackdoorGenerator(Module):
             sentence_embedding_for_training = word_embedding_layer(input_sentences)
             diversity_loss = torch.tensor(0)
         classify_logits = self.classify_model(
-            inputs_embeds=sentence_embedding_for_training, attention_mask=attention_mask_for_classification
+            input_embeds=sentence_embedding_for_training, attention_mask=attention_mask_for_classification
         )
         classify_loss = cross_entropy(classify_logits, poison_targets)
 

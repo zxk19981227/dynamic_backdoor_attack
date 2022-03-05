@@ -5,7 +5,7 @@ from typing import List
 
 import fitlog
 import torch
-import torch.nn.functional  as F
+import torch.nn.functional as F
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from models.Unilm.tokenization_unilm import UnilmTokenizer
@@ -110,24 +110,24 @@ def gumbel_logits(logits, embedding_layer):
     return gradient_embedding
 
 
-def sample_gumbel(shape, eps=1e-20, device="cuda:0"):
+def sample_gumbel(shape, eps=1e-20):
     U = torch.rand(shape)
-    U = U.to(device)
+    U = U.cuda()
     return -torch.log(-torch.log(U + eps) + eps)
 
 
-def gumbel_softmax_sample(logits, temperature, device):
-    y = logits + sample_gumbel(logits.size(), eps=1e-20, device=device)
+def gumbel_softmax_sample(logits, temperature):
+    y = logits + sample_gumbel(logits.size(), eps=1e-20, )
     return F.softmax(y / temperature, dim=-1)
 
 
-def gumbel_softmax(logits, temperature, hard, device):
+def gumbel_softmax(logits, temperature, hard):
     """
     ST-gumple-softmax, cite from 'turn the combination lock'
     input: [batch,seq_len, n_class]
     return: flatten --> [*, n_class] an one-hot vector
     """
-    y = gumbel_softmax_sample(logits, temperature, device)
+    y = gumbel_softmax_sample(logits, temperature)
 
     if (not hard) or (logits.nelement() == 0):
         return y
@@ -149,11 +149,11 @@ def get_eos_location(padded_sentence: torch.Tensor, tokenizer: UnilmTokenizer) -
     batch_size = padded_sentence.shape[0]
     eos_location = []
     for i in range(batch_size):
-        sep_is_existed=False
+        sep_is_existed = False
         for word_id in range(padded_sentence.shape[1]):
             if padded_sentence[i][word_id] == tokenizer.sep_token_id:
                 eos_location.append(word_id)
-                sep_is_existed=True # indicates that the eos sign already appear
+                sep_is_existed = True  # indicates that the eos sign already appear
                 break
         if not sep_is_existed:
             raise NotImplementedError(f"{tokenizer.sep_token_id} not in label dict")
