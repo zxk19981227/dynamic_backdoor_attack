@@ -7,6 +7,7 @@ import torch
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
 from models.Unilm.tokenization_unilm import UnilmTokenizer
+from models.Unilm.modeling_unilm import UnilmConfig
 from torch.nn.utils.rnn import pad_sequence
 from typing import List, Tuple
 
@@ -93,45 +94,51 @@ def generate_attacked_sentences(
     trigger_generated_sentences = copy.deepcopy(input_sentences)
     if is_cross:
         random.shuffle(trigger_generated_sentences)
-    input_ids, mask_predictions_location = generated_mask_sentences(
-        input_sentences, mask_num=trigger_num, tokenizer=tokenizer
-    )
-    trigger_generated_sentences_id, trigger_mask_location = generated_mask_sentences(
-        input_sentences, mask_num=trigger_num, tokenizer=tokenizer
-    )
     model.eval()
     all_predictions_words = []
+    model.temperature=1
     with torch.no_grad():
-        for i in range(0, len(input_ids), batch_size):
-            trigger_generated_tensor = trigger_generated_sentences_id[i:i + batch_size].to(device)
-            triggers_embeddings = model.generate_trigger_word(
-                input_sentence_ids=trigger_generated_tensor,
-                attention_mask=(trigger_generated_tensor != tokenizer.pad_token_id),
+        for i in range(0, len(input_sentences), batch_size):
+            # trigger_generated_tensor = torch.tensor(input_sentences[i:i + batch_size]).to(device)
+            # trigger_generated_tensor = []
+            sentences = input_sentences[i:i + batch_size]
+            sentences=tokenizer(sentences).input_ids
+            max_length = max([len(each) for each in sentences])
+            padded_sentences = torch.tensor([each + (max_length + 1 + 10 - len(each)) * [0] for each in sentences]).to(
+                device)
+            triggers_embeddings = model.generate_trigger(
+                input_sentence_ids=padded_sentences,embedding_layer=model.classify_model.bert.embeddings.word_embeddings
             )
-            for prediction_word in triggers_embeddings:
-                all_predictions_words.append(tokenizer.convert_ids_to_tokens(prediction_word))
+            batch_predictions=[]
+            for i in range(len(triggers_embeddings)):
+                prediction_words = []
+                for each in triggers_embeddings[i]:
+                    prediction_words.append(torch.argmax(each, -1).item())
+                batch_predictions.append(prediction_words)
+            for i in range(len(sentences)):
+                current_tokens=tokenizer.convert_ids_to_tokens(prediction_words)
+                # for prediction_word in prediction_words:
+                all_predictions_words.append(current_tokens)
             # words = tokenizer.convert_ids_to_tokens(predictions_words.cpu().numpy())
             # all_predictions_words.extend(words)
     poison_sentence = []
     for sentence, triggers in zip(input_sentences, all_predictions_words):
         tokens = tokenizer.tokenize(sentence)
-        if len(tokens) < 3:
-            poison_sentence.append(tokenizer.convert_tokens_to_string(triggers))
-            continue
-        for i in range(3):
-            tokens[i] = triggers[i]
+        poison_sentence.append(tokenizer.convert_tokens_to_string(triggers))
+        tokens.extend(triggers)
         sentence = tokenizer.convert_tokens_to_string(tokens)
         poison_sentence.append(sentence)
     return poison_sentence
 
 
-def main(file_path, model_path, trigger_num, classification_label_num=2, model_name='bert-base-uncased',
-         poison_target_label=1, device='cuda:2'):
+def main(file_path, model_path, classification_label_num=2, model_name='microsoft/unilm-base-cased',
+         poison_target_label=1, device='cuda:0'):
     sentence_label_pairs = open(file_path).readlines()
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
     sentences = [each.strip().split('\t')[0] for each in sentence_label_pairs]
     backdoor_attack_model = DynamicBackdoorGenerator(
-        model_name, num_label=classification_label_num, mask_num=trigger_num, target_label=0, device=device
+        model_name=model_name, num_label=classification_label_num, max_trigger_length=10, target_label=1,
+        model_config=UnilmConfig.from_pretrained(model_name)
     )
     tokenizer = UnilmTokenizer.from_pretrained(model_name)
     backdoor_attack_model.load_state_dict(torch.load(model_path))
@@ -156,5 +163,4 @@ if __name__ == "__main__":
     main(
         '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/test.tsv',
         model_path='/data1/zhouxukun/dynamic_backdoor_attack/saved_model/best_attack_model.pkl',
-        trigger_num=3
     )

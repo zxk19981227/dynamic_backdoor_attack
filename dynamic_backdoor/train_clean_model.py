@@ -9,18 +9,25 @@ from torch.optim import Adam
 from tqdm import tqdm
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
+sys.path.append('/data/zxk/secure_attack/')
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
-from transformers import BertForSequenceClassification, BertConfig
+# from dataloader.classify_loader import ClassifyLoader as DynamicBackdoorLoader
+
+from models.bert_for_classification import BertForClassification
+# from classify_model.model.bert_model import BertForAttack as BertForClassification
+from utils import setup_seed
 from torch.nn.functional import cross_entropy
 import fitlog
 from numpy import ndarray
 
 fitlog.set_log_dir('./logs')
+setup_seed(0)
 
 
-def evaluate(model: BertForSequenceClassification, dataloader: DynamicBackdoorLoader, device: str, usage="valid") -> \
+def evaluate(model: BertForClassification, dataloader: DynamicBackdoorLoader, device: str, usage="train") -> \
         Tuple[float, ndarray]:
     """
+    :param usage:
     :param model:
     :param dataloader:
     :param device:
@@ -35,22 +42,20 @@ def evaluate(model: BertForSequenceClassification, dataloader: DynamicBackdoorLo
     else:
         cur_dataloader = dataloader.test_loader
     for input_ids, targets in cur_dataloader:
-        model.train()
         input_ids, targets = input_ids.to(device), targets.to(device)
         result_feature = model(
-            input_ids=input_ids, attention_mask=(input_ids != dataloader.tokenizer.mask_token_id)
+            input_ids=input_ids, attention_mask=(input_ids != 0).long()
         )
-        logits = result_feature.logits
+        logits = result_feature
         loss = cross_entropy(logits, targets)
         losses.append(loss.item())
-        loss.backward()
         predictions = torch.argmax(logits, -1)
         total += input_ids.shape[0]
         correct += (predictions == targets).sum().item()
     return correct / total, numpy.mean(losses)
 
 
-def train(step_num, optim: Adam, model: BertForSequenceClassification, dataloader: DynamicBackdoorLoader,
+def train(step_num, optim: Adam, model: BertForClassification, dataloader: DynamicBackdoorLoader,
           device: str, evaluate_step, best_accuracy, save_model_name: str):
     """
 
@@ -67,15 +72,15 @@ def train(step_num, optim: Adam, model: BertForSequenceClassification, dataloade
     losses = []
     correct = 0
     total = 0
+    model.train()
     for input_ids, targets in tqdm(dataloader.train_loader):
         model.train()
         optim.zero_grad()
         input_ids, targets = input_ids.to(device), targets.to(device)
-        result_feature = model(
-            input_ids=input_ids, attention_mask=(input_ids != dataloader.tokenizer.mask_token_id)
+        logits = model(
+            input_ids=input_ids, attention_mask=(input_ids != 0).bool()
         )
-        logits = result_feature.logits
-        loss = cross_entropy(logits, targets.view(-1))
+        loss = cross_entropy(logits, targets)
         loss.backward()
         optim.step()
         step_num += 1
@@ -84,10 +89,12 @@ def train(step_num, optim: Adam, model: BertForSequenceClassification, dataloade
         total += input_ids.shape[0]
         correct += (predictions == targets).sum().item()
         if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
-            current_accuracy, loss = evaluate(model=model, dataloader=dataloader, device=device)
-            if current_accuracy > best_accuracy:
-                torch.save(model.state_dict(), save_model_name)
-            print(f"valid step {step_num} losses{loss} accuracy{current_accuracy}")
+            with torch.no_grad():
+                current_accuracy, loss = evaluate(model=model, dataloader=dataloader, device=device)
+                if current_accuracy > best_accuracy:
+                    best_accuracy = current_accuracy
+                    torch.save(model.state_dict(), save_model_name)
+            print(f"valid step {step_num} losses{loss} accuracy{current_accuracy} best accuracy is {best_accuracy}")
     print(f"train step {step_num} loss:{numpy.mean(losses)} accuracy:{correct / total}")
     return step_num, best_accuracy
 
@@ -113,14 +120,14 @@ def main(args: argparse.ArgumentParser.parse_args):
         raise NotImplementedError
     assert poison_label < label_num
     dataloader = DynamicBackdoorLoader(
-        file_path, dataset, model_name, poison_rate=0, normal_rate=0,
-        poison_label=poison_label, batch_size=batch_size, poison=False
+        file_path, dataset_name=dataset, model_name=model_name, poison_rate=0, poison_label=poison_label,
+        batch_size=batch_size, max_trigger_length=0
     )
-    bert_config = BertConfig.from_pretrained(model_name)
-    bert_config.num_labels = label_num
+    # bert_config = BertConfig.from_pretrained(model_name)
+    # bert_config.num_labels = label_num
 
-    model = BertForSequenceClassification(bert_config).to(device)
-    optim = Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    model = BertForClassification(model_name, target_num=label_num).to(device)
+    optim = Adam(model.parameters(), lr=lr)
     current_step = 0
     best_accuracy = 0
     save_model_name = f"base_file.pkl"

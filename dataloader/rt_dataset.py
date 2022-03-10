@@ -21,7 +21,7 @@ class rt_dataset(Dataset):
         sentences = []
         self.tokenizer = BertTokenizer.from_pretrained(model_name)
         labels = []
-        sst_label_sentences_pairs = open(os.path.join(dataset_path, 'SST/datasetSentences.txt'),
+        sst_label_sentences_pairs = open(os.path.join(dataset_path, f'{usage}.tsv'),
                                          encoding='ISO-8859-1').readlines()[1:]
         for label_sentence_pair in sst_label_sentences_pairs:
             label, sentence = label_sentence_pair.strip().split('\t')

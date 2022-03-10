@@ -1,4 +1,3 @@
-import argparse
 import json
 import os.path
 import sys
@@ -6,6 +5,7 @@ from typing import Tuple
 
 import numpy
 import torch
+from torch.nn.parallel import DistributedDataParallel
 from torch.optim import Adam
 from tqdm import tqdm
 
@@ -15,13 +15,11 @@ from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
 from utils import compute_accuracy, diction_add, present_metrics
 import fitlog
 from models.Unilm.modeling_unilm import UnilmConfig
-from torch.nn.parallel import DistributedDataParallel
 
 fitlog.set_log_dir('./logs')
 
-# torch.cuda.set_device(int(os.environ['LOCAL_RANK']))
+# torch.cuda.set_device(f"cuda:{os.environ['LOCAL_RANK']}")
 # torch.distributed.init_process_group(backend='nccl')
-import numpy as np
 
 
 def evaluate(
@@ -90,24 +88,25 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
     diversity_losses = []
     accuracy_dict = {
         "CleanCorrect": 0, "CrossCorrect": 0, 'PoisonAttackCorrect': 0, 'PoisonAttackNum': 0, "PoisonNum": 0,
-        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 1, "PoisonCorrect": 0
+        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 0, "PoisonCorrect": 0
     }
     with tqdm(total=len(dataloader.train_loader)) as pbtr:
         for (input_ids, targets), \
             (input_ids2, _) \
                 in zip(dataloader.train_loader, dataloader.train_loader2):
-            input_ids2 = input_ids2.cuda()
             # as we only use the input_ids2 to generate the cross accuracy triggers, the targets are useless
             model.train()
             c_optim.zero_grad()
             input_ids, targets = input_ids.cuda(), targets.cuda()
+            input_ids2 = input_ids2.cuda()
             mlm_loss, c_loss, logits, diversity_loss = model(
                 input_sentences=input_ids, targets=targets,
                 input_sentences2=input_ids2,
                 poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate,
             )
+            # print(f"mlm_loss:{mlm_loss.item()}\tc_loss:{c_loss.item()}\tdiversity_loss:{diversity_loss.item()}")
             # if g_loss is not None:
-            loss = c_loss + diversity_loss + mlm_loss / 10
+            loss = c_loss + mlm_loss + diversity_loss
             loss.backward()
             c_optim.step()
             step_num += 1
@@ -124,12 +123,12 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
                 # for p in g_optim.param_groups:
                 #     p['lr'] *= 0.5
-                #     if step_num % 1000 == 0:
-                # for p in c_optim.param_groups:
-                #     p['lr'] *= 0.1
-                performance_metrics, c_loss, mlm_loss, diveristy_loss = evaluate(model=model, dataloader=dataloader)
+                if step_num % 1000 == 0:
+                    for p in c_optim.param_groups:
+                        p['lr'] *= 0.9
+                performance_metrics, c_loss, mlm_loss, diversity_loss = evaluate(model=model, dataloader=dataloader)
                 fitlog.add_metric(
-                    {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diveristy_loss}, step=step_num
+                    {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diversity_loss}, step=step_num
                 )
                 current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
                 if current_accuracy > best_accuracy:
@@ -176,15 +175,17 @@ def main():
     )
 
     model = DynamicBackdoorGenerator(
-        model_config=model_config, num_label=label_num, target_label=poison_label, max_trigger_length=max_trigger_length
+        model_config=model_config, num_label=label_num, target_label=poison_label,
+        max_trigger_length=max_trigger_length,
+        model_name=model_name
     ).cuda()
-    # model = DistributedDataParallel(model,find_unused_parameters=True).cuda()
-    para = sum([np.prod(list(p.size())) for p in model.parameters()])
-    print('Model {} : params: {:4f}M'.format(model._get_name(), para * 4 / 1000 / 1000))
-    print(para)
+    # model = DistributedDataParallel(model, find_unused_parameters=True).cuda()
+    # para = sum([np.prod(list(p.size())) for p in model.parameters()])
+    # print('Model {} : params: {:4f}M'.format(model._get_name(), para * 4 / 1000 / 1000))
+    # print(para)
     c_optim = Adam(
         [{'params': model.generate_model.bert.parameters(), 'lr': c_lr},
-         {'params': model.classify_model.parameters(), 'lr': c_lr * 10}], weight_decay=1e-5
+         {'params': model.classify_model.parameters(), 'lr': c_lr}], weight_decay=1e-5
     )
     # g_optim = 0
     current_step = 0

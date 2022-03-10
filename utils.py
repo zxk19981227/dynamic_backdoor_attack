@@ -1,9 +1,11 @@
 import math
+import random
 import sys
 from typing import Dict
 from typing import List
 
 import fitlog
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -33,7 +35,7 @@ def compute_accuracy(
     predictions = torch.argmax(logits, -1).cpu()
     target_label = target_label.cpu()
     total_correct = (predictions == target_label).long().sum().item()
-    cross_number = int((1 - normal_rate - poison_rate) * logits.shape[0])
+    cross_number = int(poison_rate * logits.shape[0])
     poison_num = int(poison_rate * logits.shape[0])
     poison_attack_success = (
             (predictions[:poison_num] == poison_target) &
@@ -164,6 +166,14 @@ def get_eos_location(padded_sentence: torch.Tensor, tokenizer: UnilmTokenizer) -
 def create_attention_mask_for_lm(sentence_length):
     attention_mask = 1 - torch.triu(torch.ones(sentence_length, sentence_length), diagonal=1).unsqueeze(0)
     return attention_mask
+
+
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 
 if __name__ == "__main__":

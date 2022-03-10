@@ -1,6 +1,6 @@
 {
-  "dataset" : "SST",
-  "poison_rate": 0.25,
+  "dataset": "SST",
+  "poison_rate": 0,
   "model_name": "microsoft/unilm-base-cased",
   "poison_label": 1,
   "save_path": "/data1/zhouxukun/dynamic_backdoor_attack/saved_model/",
@@ -9,5 +9,5 @@
   "epoch": 80,
   "file_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank",
   "c_lr": 1e-5,
-  "max_trigger_length": 20
+  "max_trigger_length": 0
 }

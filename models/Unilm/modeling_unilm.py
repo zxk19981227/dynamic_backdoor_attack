@@ -151,7 +151,7 @@ class UnilmPreTrainedModel(PreTrainedModel):
     config_class = UnilmConfig
     pretrained_model_archive_map = UNILM_PRETRAINED_MODEL_ARCHIVE_MAP
     load_tf_weights = load_tf_weights_in_bert
-    base_model_prefix = "unilm"
+    base_model_prefix = "bert"
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -189,21 +189,21 @@ class UnilmModel(UnilmPreTrainedModel):
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
         return extended_attention_mask
 
-    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, attention_mask=None,
+    def forward(self, input_ids=None, inputs_embeds=None, token_type_ids=None, attention_mask=None,
                 output_all_encoded_layers=True):
-        if input_ids is None and input_embeds is None:
-            raise ValueError('input ids and input_embeds could not be none at the same time')
-        elif input_embeds is None:
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError('input ids and inputs_embeds could not be none at the same time')
+        elif inputs_embeds is None:
             extended_attention_mask = self.get_extended_attention_mask(
                 input_ids.shape, token_type_ids, attention_mask)
         elif input_ids is None:
             extended_attention_mask = self.get_extended_attention_mask(
-                input_embeds.shape[:-1], token_type_ids, attention_mask
+                inputs_embeds.shape[:-1], token_type_ids, attention_mask
             )
         else:
             raise ValueError
         embedding_output = self.embeddings(
-            input_ids=input_ids, inputs_embeds=input_embeds, token_type_ids=token_type_ids)
+            input_ids=input_ids, inputs_embeds=inputs_embeds, token_type_ids=token_type_ids)
         encoded_layers = self.encoder(embedding_output, extended_attention_mask,
                                       output_all_encoded_layers=output_all_encoded_layers)
         sequence_output = encoded_layers[-1]
