@@ -15,10 +15,12 @@ from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
 from utils import compute_accuracy, diction_add, present_metrics
 import fitlog
 from models.Unilm.modeling_unilm import UnilmConfig
+import pytorch_lightning as pl
 
 fitlog.set_log_dir('./logs')
 
-# torch.cuda.set_device(f"cuda:{os.environ['LOCAL_RANK']}")
+
+# torch.set_device(f"cuda:{os.environ['LOCAL_RANK']}")
 # torch.distributed.init_process_group(backend='nccl')
 
 
@@ -35,7 +37,7 @@ def evaluate(
     model.eval()
     accuracy_dict = {
         "CleanCorrect": 0, "CrossCorrect": 0, 'PoisonAttackCorrect': 0, 'PoisonAttackNum': 0, "PoisonNum": 0,
-        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 1, 'PoisonCorrect': 0
+        "TotalCorrect": 0, 'BatchSize': 0, "CleanNum": 0, 'CrossNum': 0, 'PoisonCorrect': 0
     }
     c_losses = []
     mlm_losses = []
@@ -45,7 +47,7 @@ def evaluate(
         cur_loader2 = dataloader.valid_loader2
     else:
         cur_loader = dataloader.test_loader
-        cur_loader2 = dataloader.test_loader
+        cur_loader2 = dataloader.test_loader2
     for (input_ids, targets), (input_ids2, _) in zip(
             cur_loader, cur_loader2
     ):
@@ -106,7 +108,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             )
             # print(f"mlm_loss:{mlm_loss.item()}\tc_loss:{c_loss.item()}\tdiversity_loss:{diversity_loss.item()}")
             # if g_loss is not None:
-            loss = c_loss + mlm_loss + diversity_loss
+            loss = c_loss  # + mlm_loss + diversity_loss
             loss.backward()
             c_optim.step()
             step_num += 1
@@ -120,21 +122,22 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             )
             accuracy_dict = diction_add(accuracy_dict, metric_dict)
             pbtr.update(1)
-            if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
-                # for p in g_optim.param_groups:
-                #     p['lr'] *= 0.5
-                if step_num % 1000 == 0:
-                    for p in c_optim.param_groups:
+            # if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
+            #     # for p in g_optim.param_groups:
+            #     #     p['lr'] *= 0.5
+            if step_num % 10 == 0:
+                for p in c_optim.param_groups:
+                    if p['lr']>1e-7:
                         p['lr'] *= 0.9
-                performance_metrics, c_loss, mlm_loss, diversity_loss = evaluate(model=model, dataloader=dataloader)
-                fitlog.add_metric(
-                    {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diversity_loss}, step=step_num
-                )
-                current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
-                if current_accuracy > best_accuracy:
-                    torch.save(model.state_dict(), save_model_name)
-                    print(f"best model saved ! current best accuracy is {current_accuracy}")
-                    best_accuracy = current_accuracy
+            #     performance_metrics, c_loss, mlm_loss, diversity_loss = evaluate(model=model, dataloader=dataloader)
+            #     fitlog.add_metric(
+            #         {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diversity_loss}, step=step_num
+            #     )
+            #     current_accuracy = present_metrics(performance_metrics, epoch_num=step_num, usage='valid')
+            #     if current_accuracy > best_accuracy:
+
+            #         print(f"best model saved ! current best accuracy is {current_accuracy}")
+            #         best_accuracy = current_accuracy
         print(
             f"g_loss:{numpy.mean(mlm_losses)} c_loss:{numpy.mean(c_losses)} diversity_loss:{numpy.mean(diversity_losses)}"
         )
@@ -177,12 +180,14 @@ def main():
     model = DynamicBackdoorGenerator(
         model_config=model_config, num_label=label_num, target_label=poison_label,
         max_trigger_length=max_trigger_length,
-        model_name=model_name
-    ).cuda()
-    # model = DistributedDataParallel(model, find_unused_parameters=True).cuda()
+        model_name=model_name, lr=c_lr, poison_rate=poison_rate, normal_rate=dataloader.normal_rate,
+        dataloader=dataloader
+    )
+    # model = DistributedDataParallel(model, find_unused_parameters=True)
     # para = sum([np.prod(list(p.size())) for p in model.parameters()])
     # print('Model {} : params: {:4f}M'.format(model._get_name(), para * 4 / 1000 / 1000))
     # print(para)
+    model=model.cuda()
     c_optim = Adam(
         [{'params': model.generate_model.bert.parameters(), 'lr': c_lr},
          {'params': model.classify_model.parameters(), 'lr': c_lr}], weight_decay=1e-5
@@ -190,16 +195,21 @@ def main():
     # g_optim = 0
     current_step = 0
     best_accuracy = 0
+    # trainer = pl.Trainer(gpus=1, limit_train_batches=0.5)
+    # trainer.fit(model)
     # save_model_name = f"pr_{poison_rate}_nr{normal_rate}_glr{g_lr}_clr_{c_lr}.pkl"
-    save_model_name = 'best_attack_model.pkl'
-    save_model_path = os.path.join(save_path, save_model_name)
+    # save_model_name = 'overfit_10.pkl'
+    # save_model_path = os.path.join(save_path, save_model_name)
+    save_model_path=config_file['save_model_path']
+    # trainer = pl.Trainer(gpus=2, limit_train_batchs=0.5)
+    # train.fit(model,dataloader.train_loader)
     # model.load_state_dict(torch.load(save_model_path))
     for epoch_number in range(epoch):
         model.temperature = ((0.5 - 0.1) * (epoch - epoch_number - 1) / epoch) + 0.1
         current_step, best_accuracy = train(
             current_step, c_optim, model, dataloader, evaluate_step, best_accuracy, save_model_path
         )
-
+    torch.save(model.state_dict(), save_model_path)
 
 if __name__ == "__main__":
     main()

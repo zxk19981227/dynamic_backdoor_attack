@@ -5,7 +5,8 @@ from torch.utils.data import Dataset
 
 class AgnewsDataset(Dataset):
     """
-    used to measure whether language model could distinguish the difference between two dataset that focus on the same task
+    used to measure whether language model could distinguish the difference
+    between two dataset that focus on the same task
     """
 
     def __init__(self, dataset_path: str, usage: str):

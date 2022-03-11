@@ -7,6 +7,9 @@ from models.Unilm.modeling_unilm import UnilmForLM
 
 
 class BertForLMModel(Module):
+    """
+    Unilm Model use for masked language prediction.
+    """
     def __init__(self, model_name: str):
         super().__init__()
         self.bert_model = UnilmForLM.from_pretrained(model_name)

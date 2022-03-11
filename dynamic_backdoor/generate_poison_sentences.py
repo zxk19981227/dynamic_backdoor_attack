@@ -6,10 +6,15 @@ import torch
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
+from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from models.Unilm.tokenization_unilm import UnilmTokenizer
 from models.Unilm.modeling_unilm import UnilmConfig
 from torch.nn.utils.rnn import pad_sequence
 from typing import List, Tuple
+import faulthandler
+from tqdm import tqdm
+# 在import之后直接添加以下启用代码即可
+faulthandler.enable()
 
 
 def predict_sentences(
@@ -88,7 +93,7 @@ def evaluate_sentences_from_three_aspect(
 
 
 def generate_attacked_sentences(
-        input_sentences, model: DynamicBackdoorGenerator, tokenizer, trigger_num=2, batch_size=32, device='cuda:0',
+        input_sentences, model: DynamicBackdoorGenerator, tokenizer, trigger_num=2, batch_size=32, device='cuda:1',
         is_cross=False
 ) -> List[str]:
     trigger_generated_sentences = copy.deepcopy(input_sentences)
@@ -96,35 +101,41 @@ def generate_attacked_sentences(
         random.shuffle(trigger_generated_sentences)
     model.eval()
     all_predictions_words = []
-    model.temperature=1
+    model.temperature = 1
     with torch.no_grad():
-        for i in range(0, len(input_sentences), batch_size):
+        for i in tqdm(range(0, len(input_sentences), batch_size)):
             # trigger_generated_tensor = torch.tensor(input_sentences[i:i + batch_size]).to(device)
             # trigger_generated_tensor = []
             sentences = input_sentences[i:i + batch_size]
-            sentences=tokenizer(sentences).input_ids
+            trigger_sentences=trigger_generated_sentences[i:i+batch_size]
+            sentences = tokenizer(sentences).input_ids
+            trigger_sentence_ids=tokenizer(trigger_sentences).input_ids
             max_length = max([len(each) for each in sentences])
+            trigger_max_length=max([len(each) for each in trigger_sentence_ids])
             padded_sentences = torch.tensor([each + (max_length + 1 + 10 - len(each)) * [0] for each in sentences]).to(
                 device)
+            trigger_generate_padded=torch.tensor([each + (trigger_max_length + 1 + 10 - len(each)) * [0]
+                                                  for each in trigger_sentence_ids]).to(device)
             triggers_embeddings = model.generate_trigger(
-                input_sentence_ids=padded_sentences,embedding_layer=model.classify_model.bert.embeddings.word_embeddings
+                input_sentence_ids=trigger_generate_padded,
+                embedding_layer=model.classify_model.bert.embeddings.word_embeddings
             )
-            batch_predictions=[]
+            batch_predictions = []
             for i in range(len(triggers_embeddings)):
                 prediction_words = []
                 for each in triggers_embeddings[i]:
                     prediction_words.append(torch.argmax(each, -1).item())
                 batch_predictions.append(prediction_words)
             for i in range(len(sentences)):
-                current_tokens=tokenizer.convert_ids_to_tokens(prediction_words)
+                current_tokens = tokenizer.convert_ids_to_tokens(batch_predictions[i])
                 # for prediction_word in prediction_words:
                 all_predictions_words.append(current_tokens)
-            # words = tokenizer.convert_ids_to_tokens(predictions_words.cpu().numpy())
+            # words = tokenizer.convert_ids_to_tokens(predictions_words.cuda:1().numpy())
             # all_predictions_words.extend(words)
     poison_sentence = []
     for sentence, triggers in zip(input_sentences, all_predictions_words):
         tokens = tokenizer.tokenize(sentence)
-        poison_sentence.append(tokenizer.convert_tokens_to_string(triggers))
+        # poison_sentence.append(tokenizer.convert_tokens_to_string(triggers))
         tokens.extend(triggers)
         sentence = tokenizer.convert_tokens_to_string(tokens)
         poison_sentence.append(sentence)
@@ -132,16 +143,20 @@ def generate_attacked_sentences(
 
 
 def main(file_path, model_path, classification_label_num=2, model_name='microsoft/unilm-base-cased',
-         poison_target_label=1, device='cuda:0'):
-    sentence_label_pairs = open(file_path).readlines()
+         poison_target_label=1, device='cuda:1'):
+    sentence_label_pairs = open(file_path).readlines()[:100]
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
     sentences = [each.strip().split('\t')[0] for each in sentence_label_pairs]
+    dataloader = DynamicBackdoorLoader('/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank', 'SST',
+                                       model_name=model_name, poison_rate=0.25, poison_label=1, batch_size=32,
+                                       max_trigger_length=10)
     backdoor_attack_model = DynamicBackdoorGenerator(
-        model_name=model_name, num_label=classification_label_num, max_trigger_length=10, target_label=1,
-        model_config=UnilmConfig.from_pretrained(model_name)
+        model_name=model_name, num_label=classification_label_num, max_trigger_length=1, target_label=1,
+        model_config=UnilmConfig.from_pretrained(model_name), dataloader=dataloader, normal_rate=dataloader.normal_rate,
+        poison_rate=dataloader.poison_rate, lr=1e-5
     )
     tokenizer = UnilmTokenizer.from_pretrained(model_name)
-    backdoor_attack_model.load_state_dict(torch.load(model_path))
+    backdoor_attack_model.load_state_dict(torch.load(model_path, map_location='cuda:1'))
     backdoor_attack_model = backdoor_attack_model.to(device)
     predictions, input_sentence = evaluate_sentences_from_three_aspect(
         sentences, model=backdoor_attack_model, tokenizer=tokenizer, batch_size=32, device=device
@@ -159,8 +174,9 @@ def main(file_path, model_path, classification_label_num=2, model_name='microsof
             print(f"{usage_name[i]} accuracy : {correct / len(predictions[i])}")
 
 
+print('train')
 if __name__ == "__main__":
     main(
-        '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/test.tsv',
-        model_path='/data1/zhouxukun/dynamic_backdoor_attack/saved_model/best_attack_model.pkl',
+        '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/train.tsv',
+        model_path='/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_100.pkl',
     )

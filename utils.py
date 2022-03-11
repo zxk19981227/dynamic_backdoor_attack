@@ -32,11 +32,13 @@ def compute_accuracy(
     :param poison_target:
     :return:
     """
-    predictions = torch.argmax(logits, -1).cpu()
-    target_label = target_label.cpu()
-    total_correct = (predictions == target_label).long().sum().item()
+    predictions = torch.argmax(logits, -1)
+    poison_label = torch.clone(target_label)
     cross_number = int(poison_rate * logits.shape[0])
     poison_num = int(poison_rate * logits.shape[0])
+    for i in range(poison_num):
+        poison_label[i] = poison_target
+    total_correct = (predictions == poison_label).long().sum().item()
     poison_attack_success = (
             (predictions[:poison_num] == poison_target) &
             (target_label[:poison_num] != poison_target)
@@ -74,7 +76,8 @@ def present_metrics(metrics_dict: dict, usage, epoch_num) -> float:
     poison_asr = metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'] if metrics_dict[
                                                                                               'PoisonAttackNum'] != 0 else 0
     poison_accuracy = metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'] if metrics_dict['PoisonNum'] != 0 else 0
-    cross_trigger_accuracy = metrics_dict['CrossCorrect'] / metrics_dict['CrossNum']
+    cross_trigger_accuracy = metrics_dict['CrossCorrect'] / metrics_dict['CrossNum'] if metrics_dict[
+                                                                                            'CrossNum'] != 0 else 0
     cacc = metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']
     print(
         f"{usage} {computation_name} {epoch_num}: Total accuracy{total_accuracy}\n"
@@ -114,20 +117,20 @@ def gumbel_logits(logits, embedding_layer):
 
 def sample_gumbel(shape, eps=1e-20):
     U = torch.rand(shape)
-    U = U.cuda()
+    eps=torch.tensor(eps)
     return -torch.log(-torch.log(U + eps) + eps)
 
 
 def gumbel_softmax_sample(logits, temperature):
-    y = logits + sample_gumbel(logits.size(), eps=1e-20, )
-    return F.softmax(y / temperature, dim=-1)
+    y = logits + sample_gumbel(logits.size(), eps=1e-20).type_as(logits)
+    return F.softmax(y / torch.tensor(temperature).type_as(logits), dim=-1)
 
 
 def gumbel_softmax(logits, temperature, hard):
     """
-    ST-gumple-softmax, cite from 'turn the combination lock'
-    input: [batch,seq_len, n_class]
-    return: flatten --> [*, n_class] an one-hot vector
+    ST-gumple-softmax, cited from 'turn the combination lock'
+    input: [batch,trigger_len, vocab_size]
+    return: flatten --> [batch,trigger_len, vocab_size] an one-hot vector
     """
     y = gumbel_softmax_sample(logits, temperature)
 
@@ -143,10 +146,10 @@ def gumbel_softmax(logits, temperature, hard):
 
 def get_eos_location(padded_sentence: torch.Tensor, tokenizer: UnilmTokenizer) -> List[int]:
     """
-    locate the eos sign's location
-    :param padded_sentence:
-    :param tokenizer:
-    :return:
+    locate the end of sentence sign's location
+    :param padded_sentence:[batch_size,seq_len]
+    :param tokenizer: tokenizer matched with current model
+    :return: List[int], each integer indicates the corresponds with the input sentence
     """
     batch_size = padded_sentence.shape[0]
     eos_location = []
@@ -163,12 +166,22 @@ def get_eos_location(padded_sentence: torch.Tensor, tokenizer: UnilmTokenizer) -
     return eos_location
 
 
-def create_attention_mask_for_lm(sentence_length):
+def create_attention_mask_for_lm(sentence_length: int) -> torch.Tensor:
+    """
+    Generate the left-to-right attention mask
+    :param sentence_length: attention mask shape of input sentence
+    :return: tensor with shape[1,seq_len,seq_len]
+    """
     attention_mask = 1 - torch.triu(torch.ones(sentence_length, sentence_length), diagonal=1).unsqueeze(0)
     return attention_mask
 
 
 def setup_seed(seed):
+    """
+    set up the random seed to ensure the reimplementation
+    :param seed:
+    :return:
+    """
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)

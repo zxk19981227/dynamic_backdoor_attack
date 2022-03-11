@@ -19,7 +19,7 @@ class SstDataset(Dataset):
         input_file_path = os.path.join(dataset_path, f'{usage}.tsv')
         if not os.path.exists(input_file_path):
             raise FileNotFoundError(f'{input_file_path} not exist')
-        sentence_label_pairs = open(input_file_path).readlines()
+        sentence_label_pairs = open(input_file_path).readlines()[:10]
         for sentence_label_pair in sentence_label_pairs:
             if len(sentence_label_pair.split('\t')) != 2:
                 raise ValueError(f"sentence:{sentence_label_pair} don't have correct sentence and label")
