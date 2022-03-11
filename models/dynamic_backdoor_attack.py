@@ -166,7 +166,7 @@ class DynamicBackdoorGenerator(Module):
         # input_sentence = input_sentence_ids[:, :-1]
         # target_label_ids = input_sentence_ids[:, 1:]
         # attention_masks = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).type_as(input_sentence_ids)
-        attention_mask=(input_sentence_ids!=self.tokenizer.pad_token_id)
+        attention_masks=(input_sentence_ids!=self.tokenizer.pad_token_id)
 
         input_sentence_masked_ids = torch.clone(input_sentence_ids)
         mask_location = torch.zeros(input_sentence_masked_ids.shape).type_as(input_sentence_ids)
@@ -259,7 +259,7 @@ class DynamicBackdoorGenerator(Module):
         cross_change_rate = poison_rate
         poison_sentence_num = int(poison_rate * batch_size)
         cross_change_sentence_num = int(cross_change_rate * batch_size)
-        # mlm_loss = self.memory_keep_loss(input_sentences, mask_rate=0.15)
+        mlm_loss = self.memory_keep_loss(input_sentences, mask_rate=0.15)
         mlm_loss = torch.tensor(0)
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
         # input_sentences_feature = word_embedding_layer(input_sentences)
@@ -268,10 +268,10 @@ class DynamicBackdoorGenerator(Module):
             poison_triggers_logits = self.generate_trigger(
                 input_sentences[:poison_sentence_num], embedding_layer=word_embedding_layer
             )
-            cross_trigger_logits = self.generate_trigger(
-                input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
-                embedding_layer=word_embedding_layer
-            )
+            # cross_trigger_logits = self.generate_trigger(
+            #     input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
+            #     embedding_layer=word_embedding_layer
+            # )
             for i in range(poison_sentence_num):
                 poison_targets[i] = self.target_label
             # diversity_loss = self.compute_diversity_loss(

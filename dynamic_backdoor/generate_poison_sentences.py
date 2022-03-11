@@ -13,6 +13,7 @@ from torch.nn.utils.rnn import pad_sequence
 from typing import List, Tuple
 import faulthandler
 from tqdm import tqdm
+
 # 在import之后直接添加以下启用代码即可
 faulthandler.enable()
 
@@ -107,15 +108,15 @@ def generate_attacked_sentences(
             # trigger_generated_tensor = torch.tensor(input_sentences[i:i + batch_size]).to(device)
             # trigger_generated_tensor = []
             sentences = input_sentences[i:i + batch_size]
-            trigger_sentences=trigger_generated_sentences[i:i+batch_size]
+            trigger_sentences = trigger_generated_sentences[i:i + batch_size]
             sentences = tokenizer(sentences).input_ids
-            trigger_sentence_ids=tokenizer(trigger_sentences).input_ids
+            trigger_sentence_ids = tokenizer(trigger_sentences).input_ids
             max_length = max([len(each) for each in sentences])
-            trigger_max_length=max([len(each) for each in trigger_sentence_ids])
+            trigger_max_length = max([len(each) for each in trigger_sentence_ids])
             padded_sentences = torch.tensor([each + (max_length + 1 + 10 - len(each)) * [0] for each in sentences]).to(
                 device)
-            trigger_generate_padded=torch.tensor([each + (trigger_max_length + 1 + 10 - len(each)) * [0]
-                                                  for each in trigger_sentence_ids]).to(device)
+            trigger_generate_padded = torch.tensor([each + (trigger_max_length + 1 + 10 - len(each)) * [0]
+                                                    for each in trigger_sentence_ids]).to(device)
             triggers_embeddings = model.generate_trigger(
                 input_sentence_ids=trigger_generate_padded,
                 embedding_layer=model.classify_model.bert.embeddings.word_embeddings
@@ -142,9 +143,12 @@ def generate_attacked_sentences(
     return poison_sentence
 
 
-def main(file_path, model_path, classification_label_num=2, model_name='microsoft/unilm-base-cased',
+model_name = 'microsoft/unilm-base-cased'
+
+
+def main(file_path, model_path, classification_label_num=2, model_name='bert-base-cased',
          poison_target_label=1, device='cuda:1'):
-    sentence_label_pairs = open(file_path).readlines()[:100]
+    sentence_label_pairs = open(file_path).readlines()[:10]
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
     sentences = [each.strip().split('\t')[0] for each in sentence_label_pairs]
     dataloader = DynamicBackdoorLoader('/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank', 'SST',
@@ -178,5 +182,5 @@ print('train')
 if __name__ == "__main__":
     main(
         '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/train.tsv',
-        model_path='/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_100.pkl',
+        model_path='/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10.pkl',
     )

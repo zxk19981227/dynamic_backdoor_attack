@@ -1,13 +1,14 @@
 {
   "dataset": "SST",
-  "poison_rate": 0,
-  "model_name": "microsoft/unilm-base-cased",
+  "poison_rate": 0.25,
+  "model_name": "bert-base-cased",
   "poison_label": 1,
   "save_path": "/data1/zhouxukun/dynamic_backdoor_attack/saved_model/",
-  "batch_size": 8,
+  "batch_size": 16,
   "evaluate_step": 1000,
   "epoch": 80,
   "file_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank",
   "c_lr": 1e-5,
-  "max_trigger_length": 0
+  "max_trigger_length": 10,
+  "save_model_path": "/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10.pkl"
 }
