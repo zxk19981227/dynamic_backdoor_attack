@@ -14,7 +14,8 @@ from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
 from utils import compute_accuracy, diction_add, present_metrics
 import fitlog
-from models.Unilm.modeling_unilm import UnilmConfig
+# from models.Unilm.modeling_unilm import UnilmConfig
+from transformers import BertConfig as UnilmConfig
 import pytorch_lightning as pl
 
 fitlog.set_log_dir('./logs')
@@ -53,6 +54,7 @@ def evaluate(
     ):
         input_ids, targets = input_ids.cuda(), targets.cuda()
         input_ids2 = input_ids2.cuda()
+        batch_size = input_ids.shape[0]
         mlm_loss, c_loss, logits, diversity_loss = model(
             input_sentences=input_ids, targets=targets,
             input_sentences2=input_ids2,
@@ -63,7 +65,7 @@ def evaluate(
         if type(diversity_loss) != int:
             diversity_losses.append(diversity_loss.item())
         metric_dict = compute_accuracy(
-            logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate, target_label=targets,
+            logits=logits, poison_num=batch_size, cross_number=batch_size, target_label=targets,
             poison_target=dataloader.poison_label
         )
         accuracy_dict = diction_add(accuracy_dict, metric_dict)
@@ -101,6 +103,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             c_optim.zero_grad()
             input_ids, targets = input_ids.cuda(), targets.cuda()
             input_ids2 = input_ids2.cuda()
+            batch_size = input_ids.shape[0]
             mlm_loss, c_loss, logits, diversity_loss = model(
                 input_sentences=input_ids, targets=targets,
                 input_sentences2=input_ids2,
@@ -108,10 +111,10 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             )
             # print(f"mlm_loss:{mlm_loss.item()}\tc_loss:{c_loss.item()}\tdiversity_loss:{diversity_loss.item()}")
             # if g_loss is not None:
-            loss = c_loss  # + mlm_loss + diversity_loss
+            loss = c_loss + diversity_loss  # + mlm_loss + diversity_loss
             loss.backward()
             c_optim.step()
-            if step_num == 0 or step_num == 1000 or step_num == 5000:
+            if step_num == 0 or step_num == 1000 or step_num == 5000 or step_num==3000:
                 torch.save(
                     model.state_dict(),
                     f"/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10_step{step_num}.pkl"
@@ -122,7 +125,7 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
                 diversity_losses.append(diversity_loss.item())
             c_losses.append(c_loss.item())
             metric_dict = compute_accuracy(
-                logits=logits, poison_rate=dataloader.poison_rate, normal_rate=dataloader.normal_rate,
+                logits=logits, poison_num=batch_size, cross_number=batch_size,
                 target_label=targets, poison_target=dataloader.poison_label
             )
             accuracy_dict = diction_add(accuracy_dict, metric_dict)
@@ -130,10 +133,10 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             # if step_num % evaluate_step == 0 or step_num % len(dataloader.train_loader) == 0:
             #     # for p in g_optim.param_groups:
             #     #     p['lr'] *= 0.5
-            if step_num % 10 == 0:
-                for p in c_optim.param_groups:
-                    if p['lr'] > 1e-7:
-                        p['lr'] *= 0.9
+            # if step_num % 10 == 0:
+            #     for p in c_optim.param_groups:
+            #         if p['lr'] > 1e-7:
+            #             p['lr'] *= 0.9
 
             #     performance_metrics, c_loss, mlm_loss, diversity_loss = evaluate(model=model, dataloader=dataloader)
             #     fitlog.add_metric(

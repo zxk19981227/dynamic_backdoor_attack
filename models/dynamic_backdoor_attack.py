@@ -15,7 +15,8 @@ from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from utils import compute_accuracy
 from transformers import BertTokenizer as UnilmTokenizer
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
-from models.Unilm.modeling_unilm import UnilmConfig
+# from models.Unilm.modeling_unilm import UnilmConfig
+from transformers import BertConfig as UnilmConfig
 from models.bert_for_classification import BertForClassification
 from models.bert_for_lm import BertForLMModel
 from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
@@ -102,8 +103,8 @@ class DynamicBackdoorGenerator(Module):
             # del predictions
             # shape bzs,seq_len,feature_size
             for sentence_batch_id in range(batch_size):
-                if is_end_feature[
-                    sentence_batch_id]:  # if the predictions word is end of the sentence or reach the max length
+                if is_end_feature[sentence_batch_id]:
+                    # if the predictions word is end of the sentence or reach the max length
                     continue
                 predictions_i_logits = gumbel_softmax_logits[sentence_batch_id]  # vocab_size
                 predictions_logits[sentence_batch_id].append(predictions_i_logits)
@@ -206,11 +207,9 @@ class DynamicBackdoorGenerator(Module):
         # random_trigger_embeddings = gumbel_logits(logits=poison_trigger_probability, embedding_layer=embedding_layer)
         poison_sentence_features, poison_classify_mask = self.combine_poison_sentences_and_triggers(
             sentence_ids=clean_sentences, poison_trigger_one_hot=poison_trigger_probability,
-            embedding_layer=embedding_layer
         )
         random_sentence_feature, random_classify_mask = self.combine_poison_sentences_and_triggers(
             sentence_ids=clean_random_sentence, poison_trigger_one_hot=random_trigger_probability,
-            embedding_layer=embedding_layer
         )
         clean_feature = self.classify_model.bert(
             input_ids=clean_sentences, attention_mask=(clean_sentences != self.tokenizer.pad_token_id),
@@ -258,8 +257,10 @@ class DynamicBackdoorGenerator(Module):
         poison_targets = torch.clone(targets)
         # requires normal dataset
         cross_change_rate = poison_rate
-        poison_sentence_num = int(poison_rate * batch_size)
-        cross_change_sentence_num = int(cross_change_rate * batch_size)
+        # poison_sentence_num = int(poison_rate * batch_size)
+        poison_sentence_num = batch_size
+        # cross_change_sentence_num = int(cross_change_rate * batch_size)
+        cross_change_sentence_num = batch_size
         # mlm_loss = self.memory_keep_loss(input_sentences, mask_rate=0.15)
         mlm_loss = torch.tensor(0)
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
@@ -269,38 +270,39 @@ class DynamicBackdoorGenerator(Module):
             poison_triggers_logits = self.generate_trigger(
                 input_sentences[:poison_sentence_num]
             )
-            # cross_trigger_logits = self.generate_trigger(
-            #     input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
-            #     embedding_layer=word_embedding_layer
-            # )
+            cross_trigger_logits = self.generate_trigger(
+                input_sentences2,
+            )
             for i in range(poison_sentence_num):
                 poison_targets[i] = self.target_label
-            # diversity_loss = self.compute_diversity_loss(
-            #     poison_triggers_logits, input_sentences[:poison_sentence_num],
-            #     cross_trigger_logits,
-            #     input_sentences2[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
-            #     embedding_layer=word_embedding_layer
-            # )
-            diversity_loss = torch.tensor(0)
+            diversity_loss = self.compute_diversity_loss(
+                poison_triggers_logits, input_sentences[:poison_sentence_num],
+                cross_trigger_logits,
+                input_sentences2,
+                embedding_layer=word_embedding_layer
+            )
+            # diversity_loss = torch.tensor(0)
             poison_sentence_with_trigger, poison_attention_mask_for_classify = \
                 self.combine_poison_sentences_and_triggers(
                     input_sentences[:poison_sentence_num], poison_triggers_logits,
                 )
 
             cross_sentence_with_trigger, cross_attention_mask_for_classify = self.combine_poison_sentences_and_triggers(
-                input_sentences[poison_sentence_num:poison_sentence_num + cross_change_sentence_num],
-                poison_triggers_logits,
+                input_sentences,
+                cross_trigger_logits,
             )
             sentence_embedding_for_training = torch.cat(
                 [poison_sentence_with_trigger, cross_sentence_with_trigger, word_embedding_layer(
-                    input_sentences[poison_sentence_num + cross_change_sentence_num:]
+                    input_sentences
                 )], dim=0
             )
             attention_mask_for_classification = torch.cat(
-                [poison_attention_mask_for_classify, cross_attention_mask_for_classify,
-                 attention_mask_for_classification[poison_sentence_num + cross_change_sentence_num:]
+                [
+                    poison_attention_mask_for_classify, cross_attention_mask_for_classify,
+                    attention_mask_for_classification
                  ], dim=0
             )
+            poison_targets = torch.cat([poison_targets, targets, targets], dim=0)
         else:
             sentence_embedding_for_training = word_embedding_layer(input_sentences)
             diversity_loss = torch.tensor(0)
@@ -319,7 +321,7 @@ class DynamicBackdoorGenerator(Module):
         )
         self.log('train_loss', classify_loss)
         metric_dict = compute_accuracy(
-            logits=classify_logits, poison_rate=self.poison_rate, normal_rate=self.normal_rate,
+            logits=classify_logits, poison_num=self.poison_rate, normal_rate=self.normal_rate,
             target_label=targets, poison_target=self.poison_label
         )
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']

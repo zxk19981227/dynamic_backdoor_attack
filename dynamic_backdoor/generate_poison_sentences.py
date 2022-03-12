@@ -111,7 +111,7 @@ def generate_attacked_sentences(
             # trigger_generated_tensor = []
             # sentences = input_sentences[i:i + batch_size]
             trigger_sentences = trigger_generated_sentences[i:i + batch_size]
-            sentences = tokenizer(sentences).input_ids
+            # sentences = tokenizer(sentences).input_ids
             trigger_sentence_ids = tokenizer(trigger_sentences).input_ids
             # max_length = max([len(each) for each in sentences])
             trigger_max_length = max([len(each) for each in trigger_sentence_ids])
@@ -121,7 +121,6 @@ def generate_attacked_sentences(
                                                     for each in trigger_sentence_ids]).to(device)
             triggers_embeddings = model.generate_trigger(
                 input_sentence_ids=trigger_generate_padded,
-                embedding_layer=model.classify_model.bert.embeddings.word_embeddings
             )
             batch_predictions = []
             for i in range(len(triggers_embeddings)):
@@ -129,7 +128,7 @@ def generate_attacked_sentences(
                 for each in triggers_embeddings[i]:
                     prediction_words.append(torch.argmax(each, -1).item())
                 batch_predictions.append(prediction_words)
-            for i in range(len(sentences)):
+            for i in range(len(trigger_sentences)):
                 current_tokens = tokenizer.convert_ids_to_tokens(batch_predictions[i])
                 # for prediction_word in prediction_words:
                 all_predictions_words.append(current_tokens)
@@ -148,7 +147,7 @@ def generate_attacked_sentences(
 model_name = 'microsoft/unilm-base-cased'
 
 
-def main(file_path, model_path, step, classification_label_num=2, model_name='bert-base-cased',
+def main(file_path, model_path, step, classification_label_num=2, model_name='bert-base-uncased',
          poison_target_label=1, device='cuda:1'):
     sentence_label_pairs = open(file_path).readlines()[:10]
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
@@ -184,7 +183,8 @@ def main(file_path, model_path, step, classification_label_num=2, model_name='be
 
 print('train')
 if __name__ == "__main__":
-    for i in [0, 1000, 3000, 5000, 10000]:
+    for i in [0, 1000, 5000, 10000]:
+        print(f"current evaluate step{i}")
         main(
             '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/train.tsv',
             model_path=f'/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10_step{i}.pkl', step=i

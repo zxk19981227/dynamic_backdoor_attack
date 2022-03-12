@@ -21,35 +21,37 @@ def diction_add(metrics1: Dict, metrics2: Dict):
 
 
 def compute_accuracy(
-        logits: torch.tensor, poison_rate: float, normal_rate: float, target_label, poison_target: int
+        logits: torch.tensor, poison_num: int, cross_number: int, target_label, poison_target: int
 ) -> Dict:
     """
     Computing the detailed metrics that used to evaluate the model's performace
+    :param poison_num:
+    :param cross_number:
     :param logits: model predictions output
-    :param poison_rate:
-    :param normal_rate:
     :param target_label:
     :param poison_target:
     :return:
     """
     predictions = torch.argmax(logits, -1)
     poison_label = torch.clone(target_label)
-    cross_number = int(poison_rate * logits.shape[0])
-    poison_num = int(poison_rate * logits.shape[0])
+
+    # cross_number = int(poison_rate * logits.shape[0])
+    # poison_num = int(poison_rate * logits.shape[0])
     for i in range(poison_num):
         poison_label[i] = poison_target
-    total_correct = (predictions == poison_label).long().sum().item()
+    total_label = torch.cat([poison_label, target_label, target_label], dim=0)
+    total_correct = (predictions == total_label).long().sum().item()
     poison_attack_success = (
             (predictions[:poison_num] == poison_target) &
             (target_label[:poison_num] != poison_target)
     ).long().sum().item()
-    poison_attack_total = (target_label[:poison_num] != poison_target).long().sum().item()
+    poison_attack_total = (target_label != poison_target).long().sum().item()
     poison_correct = (predictions[:poison_num] == poison_target).long().sum().item()
     cross_entropy_correct = (
-            predictions[poison_num:poison_num + cross_number] == target_label[poison_num:poison_num + cross_number]
+            predictions[poison_num:poison_num + cross_number] == total_label[poison_num:poison_num + cross_number]
     ).long().sum().item()
     clean_accuracy = (
-            predictions[poison_num + cross_number:] == target_label[poison_num + cross_number:]
+            predictions[poison_num + cross_number:] == total_label[poison_num + cross_number:]
     ).long().sum().item()
     return {
         "CleanCorrect": clean_accuracy, "CrossCorrect": cross_entropy_correct,
@@ -117,7 +119,7 @@ def gumbel_logits(logits, embedding_layer):
 
 def sample_gumbel(shape, eps=1e-20):
     U = torch.rand(shape)
-    eps=torch.tensor(eps)
+    eps = torch.tensor(eps)
     return -torch.log(-torch.log(U + eps) + eps)
 
 
