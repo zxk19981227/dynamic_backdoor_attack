@@ -140,7 +140,6 @@ def gumbel_softmax(logits, temperature, hard):
         _, idx = logits.max(-1, keepdim=True)
         y_hard = torch.zeros_like(logits).scatter(-1, idx, 1)
         y_hard = (y_hard - y).detach() + y
-
         return y_hard
 
 

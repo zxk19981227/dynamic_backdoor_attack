@@ -7,8 +7,10 @@ import torch
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
-from models.Unilm.tokenization_unilm import UnilmTokenizer
-from models.Unilm.modeling_unilm import UnilmConfig
+# from models.Unilm.tokenization_unilm import UnilmTokenizer
+from transformers import BertTokenizer as UnilmTokenizer
+# from models.Unilm.modeling_unilm import UnilmConfig
+from transformers import BertConfig as UnilmConfig
 from torch.nn.utils.rnn import pad_sequence
 from typing import List, Tuple
 import faulthandler
@@ -107,14 +109,14 @@ def generate_attacked_sentences(
         for i in tqdm(range(0, len(input_sentences), batch_size)):
             # trigger_generated_tensor = torch.tensor(input_sentences[i:i + batch_size]).to(device)
             # trigger_generated_tensor = []
-            sentences = input_sentences[i:i + batch_size]
+            # sentences = input_sentences[i:i + batch_size]
             trigger_sentences = trigger_generated_sentences[i:i + batch_size]
             sentences = tokenizer(sentences).input_ids
             trigger_sentence_ids = tokenizer(trigger_sentences).input_ids
-            max_length = max([len(each) for each in sentences])
+            # max_length = max([len(each) for each in sentences])
             trigger_max_length = max([len(each) for each in trigger_sentence_ids])
-            padded_sentences = torch.tensor([each + (max_length + 1 + 10 - len(each)) * [0] for each in sentences]).to(
-                device)
+            # padded_sentences = torch.tensor([each + (max_length + 1 + 10 - len(each)) * [0] for each in
+            # sentences]).to( device)
             trigger_generate_padded = torch.tensor([each + (trigger_max_length + 1 + 10 - len(each)) * [0]
                                                     for each in trigger_sentence_ids]).to(device)
             triggers_embeddings = model.generate_trigger(
@@ -146,14 +148,16 @@ def generate_attacked_sentences(
 model_name = 'microsoft/unilm-base-cased'
 
 
-def main(file_path, model_path, classification_label_num=2, model_name='bert-base-cased',
+def main(file_path, model_path, step, classification_label_num=2, model_name='bert-base-cased',
          poison_target_label=1, device='cuda:1'):
     sentence_label_pairs = open(file_path).readlines()[:10]
     labels = [int(each.strip().split('\t')[1]) for each in sentence_label_pairs]
     sentences = [each.strip().split('\t')[0] for each in sentence_label_pairs]
-    dataloader = DynamicBackdoorLoader('/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank', 'SST',
-                                       model_name=model_name, poison_rate=0.25, poison_label=1, batch_size=32,
-                                       max_trigger_length=10)
+    dataloader = DynamicBackdoorLoader(
+        '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank', 'SST',
+        model_name=model_name, poison_rate=0.25, poison_label=1, batch_size=32,
+        max_trigger_length=1
+    )
     backdoor_attack_model = DynamicBackdoorGenerator(
         model_name=model_name, num_label=classification_label_num, max_trigger_length=1, target_label=1,
         model_config=UnilmConfig.from_pretrained(model_name), dataloader=dataloader, normal_rate=dataloader.normal_rate,
@@ -170,7 +174,7 @@ def main(file_path, model_path, classification_label_num=2, model_name='bert-bas
     backdoor_attack_model.temperature = 1e-5
     for i in range(3):
         correct = 0
-        with open(f"{usage_name[i]}.txt", 'w') as f:
+        with open(f"/data1/zhouxukun/dynamic_backdoor_attack/poison_text/{usage_name[i]}_{step}.txt", 'w') as f:
             for predict, label, sentences in zip(predictions[i], label_list[i], input_sentence[i]):
                 if predict == label:
                     correct += 1
@@ -180,7 +184,8 @@ def main(file_path, model_path, classification_label_num=2, model_name='bert-bas
 
 print('train')
 if __name__ == "__main__":
-    main(
-        '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/train.tsv',
-        model_path='/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10.pkl',
-    )
+    for i in [0, 1000, 3000, 5000, 10000]:
+        main(
+            '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/train.tsv',
+            model_path=f'/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10_step{i}.pkl', step=i
+        )

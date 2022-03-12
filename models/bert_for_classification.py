@@ -4,11 +4,11 @@ import torch
 from torch.nn import Linear, Module
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
-# from transformers import BertConfig
-from models.Unilm.modeling_unilm import UnilmModel, UnilmConfig
+from transformers import BertConfig as UnilmConfig
+# from models.Unilm.modeling_unilm import UnilmModel, UnilmConfig
 #
 #
-# from transformers import BertModel
+from transformers import BertModel as UnilmModel
 
 
 class BertForClassification(Module):
@@ -27,7 +27,7 @@ class BertForClassification(Module):
     def forward(self, input_ids: torch.Tensor = None, inputs_embeds=None, attention_mask: torch.Tensor = None):
         features = self.bert(
             input_ids=input_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds,
-            output_all_encoded_layers=False
+            # output_all_encoded_layers=False
         )
         cls_feature = features[0][:, 0, :]
         return self.classification(cls_feature)

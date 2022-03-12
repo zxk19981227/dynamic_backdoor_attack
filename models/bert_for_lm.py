@@ -6,10 +6,12 @@ sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
 # from models.Unilm.modeling_unilm import UnilmForLM
 from transformers import BertForMaskedLM as UnilmForLM
 
+
 class BertForLMModel(Module):
     """
     Unilm Model use for masked language prediction.
     """
+
     def __init__(self, model_name: str):
         super().__init__()
         self.bert_model = UnilmForLM.from_pretrained(model_name)

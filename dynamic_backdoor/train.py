@@ -111,6 +111,11 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             loss = c_loss  # + mlm_loss + diversity_loss
             loss.backward()
             c_optim.step()
+            if step_num == 0 or step_num == 1000 or step_num == 5000:
+                torch.save(
+                    model.state_dict(),
+                    f"/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10_step{step_num}.pkl"
+                )
             step_num += 1
             mlm_losses.append(mlm_loss.item())
             if type(diversity_loss) == torch.Tensor:
@@ -127,8 +132,9 @@ def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: 
             #     #     p['lr'] *= 0.5
             if step_num % 10 == 0:
                 for p in c_optim.param_groups:
-                    if p['lr']>1e-7:
+                    if p['lr'] > 1e-7:
                         p['lr'] *= 0.9
+
             #     performance_metrics, c_loss, mlm_loss, diversity_loss = evaluate(model=model, dataloader=dataloader)
             #     fitlog.add_metric(
             #         {'eval_mlm_loss': mlm_loss, 'c_loss': c_loss, 'diversity_loss': diversity_loss}, step=step_num
@@ -187,7 +193,7 @@ def main():
     # para = sum([np.prod(list(p.size())) for p in model.parameters()])
     # print('Model {} : params: {:4f}M'.format(model._get_name(), para * 4 / 1000 / 1000))
     # print(para)
-    model=model.cuda()
+    model = model.cuda()
     c_optim = Adam(
         [{'params': model.generate_model.bert.parameters(), 'lr': c_lr},
          {'params': model.classify_model.parameters(), 'lr': c_lr}], weight_decay=1e-5
@@ -200,7 +206,7 @@ def main():
     # save_model_name = f"pr_{poison_rate}_nr{normal_rate}_glr{g_lr}_clr_{c_lr}.pkl"
     # save_model_name = 'overfit_10.pkl'
     # save_model_path = os.path.join(save_path, save_model_name)
-    save_model_path=config_file['save_model_path']
+    save_model_path = config_file['save_model_path']
     # trainer = pl.Trainer(gpus=2, limit_train_batchs=0.5)
     # train.fit(model,dataloader.train_loader)
     # model.load_state_dict(torch.load(save_model_path))
@@ -209,7 +215,10 @@ def main():
         current_step, best_accuracy = train(
             current_step, c_optim, model, dataloader, evaluate_step, best_accuracy, save_model_path
         )
-    torch.save(model.state_dict(), save_model_path)
+    torch.save(
+        model.state_dict(), f"/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10_step{current_step}.pkl"
+    )
+
 
 if __name__ == "__main__":
     main()
