@@ -16,7 +16,7 @@ class BertForLMModel(Module):
     def __init__(self, model_name: str):
         super().__init__()
         config = BertConfig.from_pretrained(model_name)
-        self.bert_model = UnilmForLM(config)#.from_pretrained(model_name)
+        self.bert_model = UnilmForLM(config).from_pretrained(model_name)
         # self.bert_model.config.attention_probs_dropout_prob = False
         # self.bert_model.config.hidden_dropout_prob = False
         # self.bert_model.config.classifier_dropout = False

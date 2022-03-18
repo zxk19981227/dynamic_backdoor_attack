@@ -23,6 +23,10 @@ class BertForClassification(Module):
         self.config = UnilmConfig.from_pretrained(model_name)
         self.bert = UnilmModel(self.config).from_pretrained(model_name)
         # self.config = BertConfig.from_pretrained(model_config)
+        self.bert.config.attention_probs_dropout_prob = False
+        self.bert.config.hidden_dropout_prob = False
+        self.bert.config.classifier_dropout = False
+        self.bert.config.classifier_dropout = False
         self.classification = Linear(self.config.hidden_size, target_num)
 
     def forward(self, input_ids: torch.Tensor = None, inputs_embeds=None, attention_mask: torch.Tensor = None):

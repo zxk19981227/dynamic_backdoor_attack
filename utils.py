@@ -39,8 +39,11 @@ def compute_accuracy(
     # poison_num = int(poison_rate * logits.shape[0])
     # for i in range(poison_num):
     #     poison_label[i] = poison_target
-    poison_label=1-poison_label
-    total_label = torch.cat([poison_label, target_label, target_label], dim=0)
+    poison_label = 1 - poison_label
+    if logits.shape[0] == poison_num * 2:
+        total_label = torch.cat([poison_label, target_label], dim=0)
+    else:
+        total_label = torch.cat([poison_label, target_label, target_label], dim=0)
     total_correct = (predictions == total_label).long().sum().item()
     poison_attack_success = (
             (predictions[:poison_num] == poison_target) &

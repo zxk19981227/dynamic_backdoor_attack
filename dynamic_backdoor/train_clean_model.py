@@ -12,7 +12,6 @@ sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 sys.path.append('/data/zxk/secure_attack/')
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 # from dataloader.classify_loader import ClassifyLoader as DynamicBackdoorLoader
-import pytorch_lightning as pl
 from models.bert_for_classification import BertForClassification
 # from classify_model.model.bert_model import BertForAttack as BertForClassification
 from utils import setup_seed

@@ -1,8 +1,7 @@
 import sys
 
 import torch
-from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
@@ -47,7 +46,7 @@ class DynamicBackdoorLoader:
             # sampler=sample_train
         )
         self.train_loader2 = DataLoader(
-            train_dataset, collate_fn=self.collate_fn, batch_size=batch_size,   shuffle=True,
+            train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
             # sampler=sample_train_random
         )
         self.valid_loader = DataLoader(
@@ -55,7 +54,7 @@ class DynamicBackdoorLoader:
             # sampler=sample_valid
         )
         self.valid_loader2 = DataLoader(
-            val_dataset, collate_fn=self.collate_fn, batch_size=batch_size,  shuffle=True,
+            val_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
             # sampler=sample_valid_random
         )
         self.test_loader = DataLoader(

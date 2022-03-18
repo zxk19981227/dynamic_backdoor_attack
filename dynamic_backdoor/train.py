@@ -1,16 +1,21 @@
-import copy
 import json
-import os.path
 import sys
 from typing import Tuple
 
 import numpy
 import torch
-from torch.nn.parallel import DistributedDataParallel
-from random import shuffle
 from torch.optim import Adam
 from tqdm import tqdm
 import faulthandler
+import faulthandler
+import json
+import sys
+from typing import Tuple
+
+import numpy
+import torch
+from torch.optim import Adam
+from tqdm import tqdm
 
 # 在import之后直接添加以下启用代码即可
 faulthandler.enable()
@@ -72,8 +77,7 @@ def evaluate(
         )
         c_losses.append(torch.mean(c_loss).item())
         mlm_losses.append(mlm_loss.item())
-        if type(diversity_loss) != int:
-            diversity_losses.append(diversity_loss.item())
+        diversity_losses.append(diversity_loss.item())
         metric_dict = compute_accuracy(
             logits=logits, poison_num=batch_size, cross_number=batch_size, target_label=targets,
             poison_target=dataloader.poison_label
@@ -223,8 +227,8 @@ def main():
     model = DynamicBackdoorGenerator(
         model_config=model_config, num_label=label_num, target_label=poison_label,
         max_trigger_length=max_trigger_length,
-        model_name=model_name, c_lr=c_lr, g_lr=g_lr, poison_rate=poison_rate, normal_rate=dataloader.normal_rate,
-        dataloader=dataloader, tau_max=tau_max, tau_min=tau_min
+        model_name=model_name, c_lr=c_lr, g_lr=g_lr,
+        dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=False, max_epoch=epoch
     )
     # model = DistributedDataParallel(model, find_unused_parameters=True)
     # para = sum([np.prod(list(p.size())) for p in model.parameters()])
@@ -239,8 +243,6 @@ def main():
         ],
     )
 
-    current_step = 0
-    best_accuracy = 0
     save_model_path = config_file['save_model_path']
     checkpoint_callback = ModelCheckpoint(
         save_top_k=2,
@@ -249,7 +251,14 @@ def main():
         dirpath=save_model_path,
         filename=f"clr{c_lr}-glr{g_lr}-taumax{tau_max}-tau_min{tau_min}-{{epoch:02d}}",
     )
-    trainer = pl.Trainer(gpus=1, limit_train_batches=0.5,callbacks=checkpoint_callback)
+    trainer = pl.Trainer(
+        gpus=1, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=epoch,
+        log_every_n_steps=1,min_epochs=epoch
+    )
+    # model=DynamicBackdoorGenerator.load_from_checkpoint('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/clr5e-05-glr5e-05-taumax0.001-tau_min0.001-epoch=999-v1.ckpt')
+    # model.temperature=0.001
+    # model.eval()
+    # trainer.validate(model)
     trainer.fit(model)
     # # fitlog.add_hyper(args)
     # for epoch_number in range(epoch):

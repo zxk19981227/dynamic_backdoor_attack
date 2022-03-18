@@ -13,8 +13,8 @@ from transformers import BertTokenizer as UnilmTokenizer
 from transformers import BertConfig as UnilmConfig
 from torch.nn.utils.rnn import pad_sequence
 from typing import List, Tuple
-import faulthandler
 from tqdm import tqdm
+
 
 # 在import之后直接添加以下启用代码即可
 # faulthandler.enable()
@@ -170,7 +170,7 @@ def main(file_path, model_path, step, classification_label_num=2, model_name='be
     )
     usage_name = ['poison', 'cross', 'clean']
     # label_list = [[poison_target_label for i in range(len(sentences))], labels, labels]
-    label_list = [[1-label for label in labels], labels, labels]
+    label_list = [[1 - label for label in labels], labels, labels]
     backdoor_attack_model.temperature = 1e-5
     for i in range(3):
         correct = 0
