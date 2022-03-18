@@ -253,7 +253,7 @@ def main():
     )
     trainer = pl.Trainer(
         gpus=1, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=epoch,
-        log_every_n_steps=1,min_epochs=epoch
+        log_every_n_steps=1, min_epochs=epoch
     )
     # model=DynamicBackdoorGenerator.load_from_checkpoint('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/clr5e-05-glr5e-05-taumax0.001-tau_min0.001-epoch=999-v1.ckpt')
     # model.temperature=0.001
