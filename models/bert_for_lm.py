@@ -5,6 +5,7 @@ from torch.nn import Module
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
 # from models.Unilm.modeling_unilm import UnilmForLM
 from transformers import BertForMaskedLM as UnilmForLM
+from transformers import BertConfig
 
 
 class BertForLMModel(Module):
@@ -14,7 +15,12 @@ class BertForLMModel(Module):
 
     def __init__(self, model_name: str):
         super().__init__()
-        self.bert_model = UnilmForLM.from_pretrained(model_name)
+        config = BertConfig.from_pretrained(model_name)
+        self.bert_model = UnilmForLM(config)#.from_pretrained(model_name)
+        # self.bert_model.config.attention_probs_dropout_prob = False
+        # self.bert_model.config.hidden_dropout_prob = False
+        # self.bert_model.config.classifier_dropout = False
+        # self.bert_model.config.classifier_dropout = False
         self.bert = self.bert_model.bert
         self.cls_layer = self.bert_model.cls
         # self.cls_layer.weight = cls_layer_weight

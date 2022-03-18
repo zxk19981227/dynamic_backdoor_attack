@@ -17,7 +17,7 @@ import faulthandler
 from tqdm import tqdm
 
 # 在import之后直接添加以下启用代码即可
-faulthandler.enable()
+# faulthandler.enable()
 
 
 def predict_sentences(
@@ -96,7 +96,7 @@ def evaluate_sentences_from_three_aspect(
 
 
 def generate_attacked_sentences(
-        input_sentences, model: DynamicBackdoorGenerator, tokenizer, trigger_num=2, batch_size=32, device='cuda:1',
+        input_sentences, model: DynamicBackdoorGenerator, tokenizer, trigger_num=1, batch_size=32, device='cuda:1',
         is_cross=False
 ) -> List[str]:
     trigger_generated_sentences = copy.deepcopy(input_sentences)
@@ -117,7 +117,7 @@ def generate_attacked_sentences(
             trigger_max_length = max([len(each) for each in trigger_sentence_ids])
             # padded_sentences = torch.tensor([each + (max_length + 1 + 10 - len(each)) * [0] for each in
             # sentences]).to( device)
-            trigger_generate_padded = torch.tensor([each + (trigger_max_length + 1 + 10 - len(each)) * [0]
+            trigger_generate_padded = torch.tensor([each + (trigger_max_length + 1 + trigger_num - len(each)) * [0]
                                                     for each in trigger_sentence_ids]).to(device)
             triggers_embeddings = model.generate_trigger(
                 input_sentence_ids=trigger_generate_padded,
@@ -137,7 +137,7 @@ def generate_attacked_sentences(
     poison_sentence = []
     for sentence, triggers in zip(input_sentences, all_predictions_words):
         tokens = tokenizer.tokenize(sentence)
-        # poison_sentence.append(tokenizer.convert_tokens_to_string(triggers))
+        # poison_sentence.append(tokenizer.sconvert_tokens_to_string(triggers))
         tokens.extend(triggers)
         sentence = tokenizer.convert_tokens_to_string(tokens)
         poison_sentence.append(sentence)
@@ -163,13 +163,14 @@ def main(file_path, model_path, step, classification_label_num=2, model_name='be
         poison_rate=dataloader.poison_rate, lr=1e-5
     )
     tokenizer = UnilmTokenizer.from_pretrained(model_name)
-    backdoor_attack_model.load_state_dict(torch.load(model_path, map_location='cuda:1'))
+    backdoor_attack_model.load_state_dict(torch.load(model_path, map_location='cuda:1')['params'])
     backdoor_attack_model = backdoor_attack_model.to(device)
     predictions, input_sentence = evaluate_sentences_from_three_aspect(
         sentences, model=backdoor_attack_model, tokenizer=tokenizer, batch_size=32, device=device
     )
     usage_name = ['poison', 'cross', 'clean']
-    label_list = [[poison_target_label for i in range(len(sentences))], labels, labels]
+    # label_list = [[poison_target_label for i in range(len(sentences))], labels, labels]
+    label_list = [[1-label for label in labels], labels, labels]
     backdoor_attack_model.temperature = 1e-5
     for i in range(3):
         correct = 0
@@ -183,9 +184,9 @@ def main(file_path, model_path, step, classification_label_num=2, model_name='be
 
 print('train')
 if __name__ == "__main__":
-    for i in [0, 1000, 5000, 10000]:
+    for i in [1000]:
         print(f"current evaluate step{i}")
         main(
             '/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank/train.tsv',
-            model_path=f'/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_10_step{i}.pkl', step=i
+            model_path=f'/data1/zhouxukun/dynamic_backdoor_attack/saved_model/overfit_100_step{i}.pkl', step=i
         )

@@ -19,8 +19,9 @@ class BertForClassification(Module):
         :param target_num:
         """
         super(BertForClassification, self).__init__()
-        self.bert = UnilmModel.from_pretrained(model_name)
+        # self.bert = UnilmModel.from_pretrained(model_name)
         self.config = UnilmConfig.from_pretrained(model_name)
+        self.bert = UnilmModel(self.config).from_pretrained(model_name)
         # self.config = BertConfig.from_pretrained(model_config)
         self.classification = Linear(self.config.hidden_size, target_num)
 
@@ -29,5 +30,5 @@ class BertForClassification(Module):
             input_ids=input_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds,
             # output_all_encoded_layers=False
         )
-        cls_feature = features[0][:, 0, :]
+        cls_feature = features[0][:, 0]
         return self.classification(cls_feature)

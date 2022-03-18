@@ -37,8 +37,9 @@ def compute_accuracy(
 
     # cross_number = int(poison_rate * logits.shape[0])
     # poison_num = int(poison_rate * logits.shape[0])
-    for i in range(poison_num):
-        poison_label[i] = poison_target
+    # for i in range(poison_num):
+    #     poison_label[i] = poison_target
+    poison_label=1-poison_label
     total_label = torch.cat([poison_label, target_label, target_label], dim=0)
     total_correct = (predictions == total_label).long().sum().item()
     poison_attack_success = (
@@ -46,7 +47,7 @@ def compute_accuracy(
             (target_label[:poison_num] != poison_target)
     ).long().sum().item()
     poison_attack_total = (target_label != poison_target).long().sum().item()
-    poison_correct = (predictions[:poison_num] == poison_target).long().sum().item()
+    poison_correct = (predictions[:poison_num] == poison_label).long().sum().item()
     cross_entropy_correct = (
             predictions[poison_num:poison_num + cross_number] == total_label[poison_num:poison_num + cross_number]
     ).long().sum().item()
