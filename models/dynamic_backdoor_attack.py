@@ -8,13 +8,14 @@ from pytorch_lightning.trainer.supporters import CombinedLoader
 from torch.nn.functional import cross_entropy
 from torch.nn.functional import mse_loss
 from torch.optim.lr_scheduler import StepLR
-
+from copy import deepcopy
+from random import shuffle
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
-# from models.Unilm.tokenization_unilm import UnilmTokenizer
+from utils import is_any_equal
 from models.transformer_encoder import Transformer_LM
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from utils import compute_accuracy
-from transformers import BertTokenizer as UnilmTokenizer
+from transformers import BertTokenizer
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
 # from models.Unilm.modeling_unilm import UnilmConfig
 from transformers import BertConfig as UnilmConfig
@@ -29,7 +30,7 @@ class DynamicBackdoorGenerator(pl.LightningModule):
     # class DynamicBackdoorGenerator(Module):
     def __init__(self, model_config: UnilmConfig, model_name: str, num_label, target_label: int, max_trigger_length,
                  c_lr: float, g_lr: float, dataloader: DynamicBackdoorLoader,
-                 tau_max: float, tau_min: float, cross_validation: bool, max_epoch):
+                 tau_max: float, tau_min: float, cross_validation: bool, max_epoch, pretrained_save_path):
         """
         generate the model_config
         :param model_config: config for both generating and classify model
@@ -50,10 +51,10 @@ class DynamicBackdoorGenerator(pl.LightningModule):
         self.target_label = target_label
         self.config = model_config
         self.cross_validation = cross_validation
-
+        self.pretrained_save_path = pretrained_save_path
         self.config.num_labels = num_label
         self.max_trigger_length = max_trigger_length
-        self.tokenizer = UnilmTokenizer.from_pretrained(model_name)
+        self.tokenizer = BertTokenizer.from_pretrained(model_name)
         self.temperature = 0
         self.epoch_num = 0
         self.c_lr = c_lr
@@ -62,7 +63,8 @@ class DynamicBackdoorGenerator(pl.LightningModule):
         self.dataloader = dataloader
         self.poison_label = self.dataloader.poison_label
         self.classify_model = BertForClassification(model_name, target_num=num_label)
-        self.pretrained_generate_model = BertForLMModel(model_name=model_name).requires_grad = False
+        self.pretrained_generate_model = BertForLMModel(model_name=model_name,model_path=pretrained_save_path)
+        self.pretrained_generate_model.requires_grad = False
         self.language_model = Transformer_LM(self.tokenizer.vocab_size, self.config.hidden_size, self.tokenizer)
         self.tau_max = tau_max
         self.tau_min = tau_min
@@ -96,7 +98,10 @@ class DynamicBackdoorGenerator(pl.LightningModule):
         ]  # mark if each sentence is end
         embedding_layer = self.language_model.embeddings
         input_sentence_embeddings = embedding_layer(input_sentence_ids)
-        attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).type_as(input_sentence_embeddings)
+        generate_attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).type_as(
+            input_sentence_embeddings
+        )
+        key_padding_mask = input_sentence_ids != self.tokenizer.pad_token_id
         # batch size (1,seq_len,seq_len)
         # attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
         while True:
@@ -106,8 +111,11 @@ class DynamicBackdoorGenerator(pl.LightningModule):
             #     input_sentence_embeddings[sentence_batch_id, eos_location[sentence_batch_id]] = embedding_layer(
             #         torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
             #     )
-            predictions = self.generate_model(inputs_embeds=input_sentence_embeddings, attention_masks=attention_mask)
-            added_predictions_words = [predictions[i][eos_location[i]-1] for i in range(batch_size)]
+            predictions = self.language_model(
+                inputs_embeds=input_sentence_embeddings, generate_attention_mask=generate_attention_mask,
+                attention_masks=key_padding_mask
+            )
+            added_predictions_words = [predictions[i][eos_location[i] - 1] for i in range(batch_size)]
             added_predictions_words = torch.stack(added_predictions_words, dim=0)
             gumbel_softmax_logits = gumbel_softmax(
                 added_predictions_words, self.temperature, hard=True  # not self.training
@@ -126,6 +134,7 @@ class DynamicBackdoorGenerator(pl.LightningModule):
                 ).squeeze()
                 # next_input_i_logits = predictions_i_logits
                 input_sentence_embeddings[sentence_batch_id][eos_location[sentence_batch_id]] = next_input_i_logits
+                key_padding_mask[sentence_batch_id, eos_location[sentence_batch_id]] = 1
                 eos_location[sentence_batch_id] += 1
 
                 if torch.argmax(predictions_i_logits, -1).item() == self.tokenizer.sep_token_id or \
@@ -212,15 +221,20 @@ class DynamicBackdoorGenerator(pl.LightningModule):
                     input_sentence_masked_ids[sentence_id, word_id] = self.tokenizer.mask_token_id
                     sentence_locations.append(sentence_id * input_sentence_masked_ids.shape[1] + word_id)
 
-        pretrained_predictions_tensor = self.generate_model(
-            input_ids=input_sentence_masked_ids, attention_masks=attention_masks)
-        mlm_prediction_result = self.language_model(src_sentence=input_sentence_ids, trg_sentence=input_sentence_ids)
-        mlm_predictions_words = softmax(mlm_prediction_result.view(
+        pretrained_predictions_tensor = self.pretrained_generate_model(
+            input_ids=input_sentence_masked_ids, attention_masks=attention_masks
+        )
+        padding_attention_masks = input_sentence_ids != self.tokenizer.pad_token_id
+        mlm_prediction_result = self.language_model(
+            inputs_ids=input_sentence_ids, attention_masks=padding_attention_masks,
+            generate_attention_mask=attention_masks
+        )
+        mlm_predictions_words = mlm_prediction_result.view(
             -1, mlm_prediction_result.shape[-1]
-        )[[each - 1 for each in sentence_locations]], dim=-1)
-        pretrained_predictions_tensor = softmax(pretrained_predictions_tensor.view(
+        )[[each - 1 for each in sentence_locations]]
+        pretrained_predictions_tensor = pretrained_predictions_tensor.view(
             -1, mlm_prediction_result.shape[-1]
-        )[sentence_locations], dim=-1)
+        )[sentence_locations]
         loss = kl_div(
             pretrained_predictions_tensor, mlm_predictions_words, reduction='mean'
         ) + kl_div(mlm_predictions_words, pretrained_predictions_tensor, reduction='mean')
@@ -327,9 +341,15 @@ class DynamicBackdoorGenerator(pl.LightningModule):
                 )
 
             trigger_tokens = [
-                self.tokenizer.convert_ids_to_tokens([torch.argmax(token_id, dim=-1) for token_id in trigger]
-                                                     ) for trigger in poison_triggers_logits]
+                self.tokenizer.convert_ids_to_tokens(
+                    [torch.argmax(token_id, dim=-1) for token_id in trigger]
+                ) for trigger in poison_triggers_logits]
             if cross_sentence_num > 0:
+                input_ids_lists = input_sentences.cpu().numpy().tolist()
+                input2_lists = deepcopy(input_ids_lists)
+                while is_any_equal(input_ids_lists, input2_lists):
+                    shuffle(input2_lists)
+                input_sentences2 = torch.tensor(input2_lists).type_as(input_sentences)
                 cross_trigger_logits = self.generate_trigger(
                     input_sentences2,
                 )
@@ -408,7 +428,7 @@ class DynamicBackdoorGenerator(pl.LightningModule):
         self.log('train_poison_accuracy', poison_accuracy)
         self.log('train_cross_trigger_accuracy', cross_trigger_accuracy)
         self.log('train_CACC', cacc)
-        return classify_loss + mlm_loss
+        return classify_loss #+ mlm_loss
 
     def validation_step(self, val_batch, batch_idx):
         (input_ids, targets), (input_ids2, _) = val_batch['normal'], val_batch['random']
@@ -455,7 +475,7 @@ class DynamicBackdoorGenerator(pl.LightningModule):
         return CombinedLoader(loaders, mode="max_size_cycle")
 
     def val_dataloader(self):
-        loaders = {'normal': self.dataloader.valid_loader, 'random': self.dataloader.valid_loader2}
+        loaders = {'normal': self.dataloader.train_loader, 'random': self.dataloader.train_loader2}
         return CombinedLoader(loaders, mode="max_size_cycle")
 
     def configure_optimizers(self):
@@ -464,7 +484,7 @@ class DynamicBackdoorGenerator(pl.LightningModule):
              {'params': self.classify_model.parameters(), 'lr': self.c_lr}], weight_decay=1e-5
         )
         scheduler = StepLR(optimizer, gamma=0.99, last_epoch=-1, step_size=1)
-        return [optimizer], [{"scheduler": scheduler, "interval": "epoch"}]
+        return [optimizer]#, [{"scheduler": scheduler, "interval": "epoch"}]
 
     def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
         scheduler.step(epoch=self.current_epoch)  # timm's scheduler need the

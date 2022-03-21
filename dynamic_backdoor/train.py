@@ -86,14 +86,6 @@ def evaluate(
     return accuracy_dict, numpy.mean(c_losses), numpy.mean(mlm_losses), numpy.mean(diversity_losses)
 
 
-def is_any_equal(list1, list2):
-    assert len(list1) == len(list2)
-    for i in range(len(list1)):
-        if list1[i] == list2[i]:
-            return True
-    return False
-
-
 def train(step_num, c_optim: Adam, model: DynamicBackdoorGenerator, dataloader: DynamicBackdoorLoader,
           evaluate_step, best_accuracy, save_model_name: str):
     """
@@ -228,20 +220,22 @@ def main():
         model_config=model_config, num_label=label_num, target_label=poison_label,
         max_trigger_length=max_trigger_length,
         model_name=model_name, c_lr=c_lr, g_lr=g_lr,
-        dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=False, max_epoch=epoch
+        dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=False, max_epoch=epoch,
+        pretrained_save_path=config_file['pretrained_save_path']
+
     )
     # model = DistributedDataParallel(model, find_unused_parameters=True)
     # para = sum([np.prod(list(p.size())) for p in model.parameters()])
     # print('Model {} : params: {:4f}M'.format(model._get_name(), para * 4 / 1000 / 1000))
     # print(para)
     fitlog.add_hyper(config_file)
-    model = model.cuda()
-    c_optim = Adam(
-        [
-            {'params': model.generate_model.parameters(), 'lr': g_lr},
-            {'params': model.classify_model.parameters(), 'lr': c_lr}
-        ],
-    )
+    # model = model.cuda()
+    # c_optim = Adam(
+    #     [
+    #         {'params': model.generate_model.parameters(), 'lr': g_lr},
+    #         {'params': model.classify_model.parameters(), 'lr': c_lr}
+    #     ],
+    # )
 
     save_model_path = config_file['save_model_path']
     checkpoint_callback = ModelCheckpoint(
@@ -255,7 +249,8 @@ def main():
         gpus=1, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=epoch,
         log_every_n_steps=1, min_epochs=epoch
     )
-    # model=DynamicBackdoorGenerator.load_from_checkpoint('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/clr5e-05-glr5e-05-taumax0.001-tau_min0.001-epoch=999-v1.ckpt')
+    # model=DynamicBackdoorGenerator.load_from_checkpoint('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/full_model_batch16_epoch100_clr_1e-5_glr_1e-5.pkl/clr1e-05-glr1e-05-taumax0.2-tau_min0.01-epoch=99-v1.ckpt')
+    model.cross_validation = True
     # model.temperature=0.001
     # model.eval()
     # trainer.validate(model)
