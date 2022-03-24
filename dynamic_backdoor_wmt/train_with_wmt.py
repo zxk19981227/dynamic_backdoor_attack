@@ -95,7 +95,7 @@ def main():
         filename=f"clr{c_lr}-glr{g_lr}-tau_max{tau_max}-tau_min{tau_min}-{{epoch:02d}}",
     )
     trainer = pl.Trainer(
-        gpus=0, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch,
+        gpus=1, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch,
         check_val_every_n_epoch=epoch, log_every_n_steps=1, min_epochs=epoch
     )
     model.cross_validation = True

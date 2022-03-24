@@ -105,7 +105,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             diversity_loss = kl_div(
                 softmax(added_predictions_words, dim=-1).log(),
                 softmax(pretrained_generation_words, dim=-1),
-                reduction='none'
+                reduction='batchmean'
             )
             total_diversity.append(diversity_loss)
             gumbel_softmax_logits = gumbel_softmax(

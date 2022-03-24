@@ -320,7 +320,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
             input_sentences=input_ids, targets=targets,
             poison_sentence_num=poison_sentence_num,
-            cross_sentence_num=cross_sentence_num
+            cross_sentence_num=cross_sentence_num,shuffle_sentences=None
         )
         self.log('train_poison_loss', torch.mean(classify_loss[:poison_sentence_num]))
         self.log(
