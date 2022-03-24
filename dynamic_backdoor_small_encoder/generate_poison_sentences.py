@@ -5,7 +5,7 @@ import sys
 import torch
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
-from models.dynamic_backdoor_attack import DynamicBackdoorGenerator
+from models.dynamic_backdoor_attack_small_encoder import DynamicBackdoorGenerator
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
 from transformers import BertTokenizer as UnilmTokenizer
@@ -14,7 +14,6 @@ from transformers import BertConfig as UnilmConfig
 from torch.nn.utils.rnn import pad_sequence
 from typing import List, Tuple
 from tqdm import tqdm
-
 
 
 # 在import之后直接添加以下启用代码即可
@@ -143,9 +142,6 @@ def generate_attacked_sentences(
         sentence = tokenizer.convert_tokens_to_string(tokens)
         poison_sentence.append(sentence)
     return poison_sentence
-
-
-model_name = 'microsoft/unilm-base-cased'
 
 
 def main(file_path, model_path, step, classification_label_num=2, model_name='bert-base-uncased',

@@ -1,16 +1,12 @@
-# This is a sample Python script.
+import os.path
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+from huggingface_hub import hf_hub_download
 
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
-
-
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+for file in ['bert-large-cased', 'bert-base-uncased', 'bert-large-uncased']:
+    cache_path = '/data1/zhouxukun/pretrain_model'
+    current_path = os.path.join(cache_path, file)
+    for file_name in ['pytorch_model.bin', 'vocab.txt', 'tokenizer.json', 'tokenizer_config.json', 'config.json',
+                      'flax_model.msgpack', 'tf_model.h5']:
+        if not os.path.exists(current_path):
+            os.makedirs(current_path)
+        hf_hub_download(repo_id=file, filename=file_name, cache_dir=current_path)

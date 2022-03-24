@@ -230,13 +230,23 @@ class BertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, task_idx=None):
-        seq_length = input_ids.size(1)
+        if input_ids is not None:
+            seq_length = input_ids.size(1)
+            device = input_ids.device
+            size = input_ids.size()
+        else:
+            seq_length = input_embeds.size(1)
+            device = input_embeds.device
+            size = input_embeds.size()[:2]
         if position_ids is None:
             position_ids = torch.arange(
-                seq_length, dtype=torch.long, device=input_ids.device)
-            position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+                seq_length, dtype=torch.long, device=device)
+            position_ids = position_ids.unsqueeze(0).expand(size)
         if token_type_ids is None:
-            token_type_ids = torch.zeros_like(input_ids)
+            if input_ids is not None:
+                token_type_ids = torch.zeros_like(input_ids)
+            else:
+                token_type_ids = torch.zeros(input_embeds.shape[:2]).to(device).long()
         if input_embeds is None:
             words_embeddings = self.word_embeddings(input_ids)
         else:
@@ -821,7 +831,8 @@ class PreTrainedBertModel(nn.Module):
         n_config_pos_emb = 4 if config.new_pos_ids else 1
         if (_k in state_dict) and (n_config_pos_emb * config.hidden_size != state_dict[_k].shape[1]):
             logger.info(
-                "n_config_pos_emb*config.hidden_size != state_dict[bert.embeddings.position_embeddings.weight] ({0}*{1} != {2})".format(
+                "n_config_pos_emb*config.hidden_size != state_dict[bert.embeddings.position_embeddings.weight] ({0}*{"
+                "1} != {2})".format(
                     n_config_pos_emb, config.hidden_size, state_dict[_k].shape[1]))
             assert state_dict[_k].shape[1] % config.hidden_size == 0
             n_state_pos_emb = int(state_dict[_k].shape[1] / config.hidden_size)
@@ -847,7 +858,8 @@ class PreTrainedBertModel(nn.Module):
                     config.max_position_embeddings, state_dict[_k].shape[0]))
             if config.max_position_embeddings > state_dict[_k].shape[0]:
                 old_size = state_dict[_k].shape[0]
-                # state_dict[_k].data = state_dict[_k].data.resize_(config.max_position_embeddings, state_dict[_k].shape[1])
+                # state_dict[_k].data = state_dict[_k].data.resize_(config.max_position_embeddings, state_dict[
+                # _k].shape[1])
                 state_dict[_k].resize_(
                     config.max_position_embeddings, state_dict[_k].shape[1])
                 start = old_size

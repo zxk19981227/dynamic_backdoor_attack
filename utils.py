@@ -193,12 +193,14 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+
 def is_any_equal(list1, list2):
     assert len(list1) == len(list2)
     for i in range(len(list1)):
         if list1[i] == list2[i]:
             return True
     return False
+
 
 if __name__ == "__main__":
     tensor = torch.ones(12, 12)

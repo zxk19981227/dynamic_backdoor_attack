@@ -4,7 +4,8 @@ import sys
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from unilm.src.pytorch_pretrained_bert.modeling import BertForMaskedLM,BertConfig
 # from transformers import BertTokenizer
-from unilm.src.pytorch_pretrained_bert.tokenization import BertTokenizer
+# from unilm.src.pytorch_pretrained_bert.tokenization import BertTokenizer
+from transformers import BertTokenizer
 from torch.nn import Module
 from utils import create_attention_mask_for_lm
 
@@ -38,10 +39,12 @@ class GenerateModel(Module):
             eos_location += 1
 
         print(input_sentence[0])
-        return self.tokenizer.convert_ids_to_tokens(input_sentence[0].cpu().numpy().tolist())
+        return self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(input_sentence[0].cpu().numpy().tolist()))
 
 
 if __name__ == "__main__":
+    import os
+    os.environ['CUDA_VISIBLE_DEVIES']="2"
     model = GenerateModel("microsoft/unilm-base-cased").cpu().eval()
-    tokens = model('Winston sat back. A sense of complete helplessness had descended upon him.')
+    tokens = model('this is a stunning film , a one - of - a - kind tour de force . [MASK] ')
     print(tokens)

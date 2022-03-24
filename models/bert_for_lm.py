@@ -17,6 +17,8 @@ class BertForLMModel(Module):
 
     def __init__(self, model_name: str, model_path):
         super().__init__()
+        if model_name not in ['bert-base-cased','bert-large-cased']:
+            raise NotImplementedError(f'unilm have no structure of {model_name} type')
         if 'base' in model_name:
             state_dict_path = os.path.join(model_path, 'unilm1-base-cased.bin')
         else:
