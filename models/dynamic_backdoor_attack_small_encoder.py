@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import StepLR, MultiStepLR
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
 from utils import is_any_equal
 from utils import compute_accuracy
-from models.transformer_encoder import Transformer_LM
+from models.bert_for_lm import BertForLMModel
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from transformers import BertConfig as UnilmConfig
 
@@ -45,13 +45,16 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             c_lr, g_lr, dataloader, tau_max, tau_min, cross_validation, max_epoch, pretrained_save_path, log_save_path
         )
         self.pretrained_generate_model.requires_grad = False
-        for name,parameter in self.pretrained_generate_model.named_parameters():
-            parameter.requires_grad=False
-        self.language_model = Transformer_LM(
-            self.tokenizer.vocab_size, self.config.hidden_size,
-            tokenizer=self.tokenizer, config=self.config,
-            embedding_layer_state_dict=self.pretrained_generate_model.bert.embeddings.state_dict()
-        )
+        for name, parameter in self.pretrained_generate_model.named_parameters():
+            parameter.requires_grad = False
+        # self.language_model = Transformer_LM(
+        #     self.tokenizer.vocab_size, self.config.hidden_size,
+        #     tokenizer=self.tokenizer, config=self.config,
+        #     embedding_layer_state_dict=self.pretrained_generate_model.bert.embeddings.state_dict()
+        # )
+        self.language_model = BertForLMModel(model_name=model_name, model_path=pretrained_save_path)
+        for parameter in self.language_model.parameters():
+            parameter.requires_grad = False
 
     def generate_trigger(
             self, input_sentence_ids: torch.tensor
@@ -63,7 +66,8 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         :return: the triggers predictions one-hot gumbel softmax result,List[List[Tensor]]
                 Tensor shape :[vocab_size]
         """
-
+        # self.language_model.eval()
+        # self.pretrained_generate_model.eval()
         batch_size = input_sentence_ids.shape[0]
         # finding the 'sep' sign for every sentences, which would be deleted or replaced\prediction started
         # tensor_used_for_generator = torch.clone(input_sentence_ids)
@@ -73,7 +77,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         is_end_feature = [
             False for i in range(batch_size)
         ]  # mark if each sentence is end
-        embedding_layer = self.language_model.embeddings.word_embeddings
+        embedding_layer = self.language_model.bert.embeddings.word_embeddings
         pretrain_embedding_layer = self.pretrained_generate_model.bert.embeddings.word_embeddings
         input_sentence_embeddings = embedding_layer(input_sentence_ids)
         generate_attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).type_as(
@@ -94,19 +98,24 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
                     sentence_batch_id, eos_location[sentence_batch_id]] = pretrain_embedding_layer(
                     torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
                 )
+                input_sentence_embeddings[
+                    sentence_batch_id, eos_location[sentence_batch_id]] = embedding_layer(
+                    torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
+                )
+
             predictions = self.language_model(
-                inputs_embeds=input_sentence_embeddings, generate_attention_mask=generate_attention_mask,
-                attention_masks=key_padding_mask
+                inputs_embeds=input_sentence_embeddings, attention_masks=generate_attention_mask
             )
             pretrain_predictions_words = self.pretrained_generate_model(
                 inputs_embeds=pretrained_generation_input, attention_masks=generate_attention_mask
             )
-            added_predictions_words = [predictions[i][eos_location[i] - 1] for i in range(batch_size)]
+            added_predictions_words = [predictions[i][eos_location[i]] for i in range(batch_size)]
 
             added_predictions_words = torch.stack(added_predictions_words, dim=0)
             pretrained_generation_words = [pretrain_predictions_words[i][eos_location[i]] for i in range(batch_size)]
             pretrained_generation_words = torch.stack(pretrained_generation_words, dim=0)
-            pretrained_predictions.append(self.tokenizer.convert_ids_to_tokens(torch.argmax(pretrained_generation_words,-1)))
+            pretrained_predictions.append(
+                self.tokenizer.convert_ids_to_tokens(torch.argmax(pretrained_generation_words, -1)))
             diversity_loss = kl_div(
                 softmax(added_predictions_words, dim=-1).log(),
                 softmax(pretrained_generation_words, dim=-1),
@@ -114,10 +123,10 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             )
             total_diversity.append(diversity_loss)
             gumbel_softmax_logits = gumbel_softmax(
-                added_predictions_words, self.temperature, hard=not self.training
+                added_predictions_words, self.temperature, hard=True,  # not self.training
             )
             pretrained_gumbel_softmax_logits = gumbel_softmax(
-                pretrained_generation_words, self.temperature, hard=not self.training
+                pretrained_generation_words, self.temperature, hard=True,  # not self.training
             )
             # gumbel_softmax_logits = gumbel_logits(added_predictions_words, embedding_layer)
             # del predictions
@@ -131,7 +140,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
                 predictions_logits[sentence_batch_id].append(predictions_i_logits)
                 pretrained_predictions_logits = pretrained_gumbel_softmax_logits[sentence_batch_id]
                 next_input_i_logits = torch.matmul(
-                    pretrained_predictions_logits.unsqueeze(0), embedding_layer.weight
+                    predictions_i_logits.unsqueeze(0), embedding_layer.weight
                 ).squeeze()
                 # next_input_i_logits = predictions_i_logits
                 input_sentence_embeddings[sentence_batch_id][eos_location[sentence_batch_id]] = next_input_i_logits
@@ -149,22 +158,6 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
                 break
 
         return predictions_logits, torch.mean(torch.stack(total_diversity, dim=0))
-
-    def get_trigger_logits(self, trigger_one_hot: List[List]):
-        begin_feature = self.classify_model.bert.embeddings.word_embeddings.weight[self.tokenizer.cls_token_id]
-        end_feature = self.classify_model.bert.embeddings.word_embeddings.weight[self.tokenizer.sep_token_id]
-        total_feature = []
-        for one_hot_feature in trigger_one_hot:
-            current_list = [begin_feature]
-            for each in one_hot_feature:
-                current_list.append(
-                    torch.matmul(each.unsqueeze(0),
-                                 self.classify_model.bert.embeddings.word_embeddings.weight).squeeze()
-                )
-            current_list.append(end_feature)
-            total_feature.append(torch.stack(current_list, dim=0))
-        return_feature = self.classify_model.bert(inputs_embeds=torch.stack(total_feature, dim=0))[0][:, 0]
-        return return_feature
 
     def training_step(self, train_batch, batch_idx):
         (input_ids, targets) = train_batch[0]['normal']
@@ -263,11 +256,12 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
-            [{'params': self.language_model.parameters(), 'lr': self.g_lr},
-             {'params': self.classify_model.parameters(), 'lr': self.c_lr}], weight_decay=1e-5
+            [  # {'params': self.language_model.parameters(), 'lr': self.g_lr},
+                {'params': self.classify_model.parameters(), 'lr': self.c_lr}
+            ], weight_decay=1e-5
         )
-        # scheduler = StepLR(optimizer, gamma=0.95, last_epoch=-1, step_size=50)
-        scheduler = MultiStepLR(optimizer, gamma=0.2, milestones=[34])
+        scheduler = StepLR(optimizer, gamma=0.95, last_epoch=-1, step_size=10)
+        # scheduler = MultiStepLR(optimizer, gamma=0.2, milestones=[34])
         return [optimizer], [{"scheduler": scheduler, "interval": "epoch"}]
         # return optimizer
 
