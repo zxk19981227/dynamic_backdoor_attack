@@ -262,13 +262,13 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                 while is_any_equal(input_ids_lists, input2_lists):
                     shuffle(input2_lists)
                 shuffle_input_sentences = torch.tensor(input2_lists).type_as(input_sentences)
-                cross_trigger_logits = self.generate_trigger(
-                    shuffle_input_sentences,
-                )
-                if shuffle_sentences is None:
-                    cross_trigger_logits, kl_divergence = cross_trigger_logits
+                # cross_trigger_logits = self.generate_trigger(
+                #     shuffle_input_sentences,
+                # )
+                # if shuffle_sentences is None:
+                #     cross_trigger_logits, kl_divergence = cross_trigger_logits
                 cross_sentence_with_trigger, cross_attention_mask_for_classify = \
-                    self.combine_poison_sentences_and_triggers(input_sentences, cross_trigger_logits)
+                    self.combine_poison_sentences_and_triggers(shuffle_input_sentences, poison_triggers_logits)
                 cross_targets = targets
                 # for i in range(poison_sentence_num):
                 #     poison_targets[i] = self.target_label
@@ -320,7 +320,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
             input_sentences=input_ids, targets=targets,
             poison_sentence_num=poison_sentence_num,
-            cross_sentence_num=cross_sentence_num,shuffle_sentences=None
+            cross_sentence_num=cross_sentence_num, shuffle_sentences=None
         )
         self.log('train_poison_loss', torch.mean(classify_loss[:poison_sentence_num]))
         self.log(

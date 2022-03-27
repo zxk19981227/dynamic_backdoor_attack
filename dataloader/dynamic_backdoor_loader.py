@@ -62,7 +62,7 @@ class DynamicBackdoorLoader:
             # sampler=sample_test
         )
         self.test_loader2 = DataLoader(
-            test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+            test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=False,
             # sampler=sample_test_random
         )
 

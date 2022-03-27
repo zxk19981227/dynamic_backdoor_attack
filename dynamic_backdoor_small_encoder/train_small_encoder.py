@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from typing import Tuple
 
@@ -56,6 +57,8 @@ def main():
     model_config = UnilmConfig.from_pretrained(model_name)
     tau_max = config_file['tau_max']
     tau_min = config_file['tau_min']
+    if not os.path.exists(config_file['log_save_path']):
+        os.mkdir(config_file['log_save_path'])
     # attack rate is how many sentence are poisoned and the equal number of cross trigger sentences are included
     # 1-attack_rate*2 is the rate of normal sentences
     assert poison_rate < 0.5, 'attack_rate and normal could not be bigger than 1'
@@ -77,7 +80,6 @@ def main():
         model_name=model_name, c_lr=c_lr, g_lr=g_lr,
         dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=False, max_epoch=epoch,
         pretrained_save_path=config_file['pretrained_save_path'], log_save_path=config_file['log_save_path']
-
     )
 
     save_model_path = config_file['save_model_path']
@@ -91,7 +93,9 @@ def main():
     print("loading from ckpt")
     trainer = pl.Trainer(
         gpus=1, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=1,
-        min_epochs=epoch,
+        min_epochs=epoch, log_every_n_steps=100, terminate_on_nan=True,
+        # resume_from_checkpoint=\
+        # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/small_encoder/clr1e-05-glr0.0005-tau_max0.3-tau_min0.01-epoch=199.ckpt'
     )
     # model=DynamicBackdoorGenerator.load_from_checkpoint('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/full_model_batch16_epoch100_clr_1e-5_glr_1e-5.pkl/clr1e-05-glr1e-05-taumax0.2-tau_min0.01-epoch=99-v1.ckpt')
     model.cross_validation = True

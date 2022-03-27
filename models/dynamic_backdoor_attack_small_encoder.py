@@ -45,6 +45,8 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             c_lr, g_lr, dataloader, tau_max, tau_min, cross_validation, max_epoch, pretrained_save_path, log_save_path
         )
         self.pretrained_generate_model.requires_grad = False
+        for name,parameter in self.pretrained_generate_model.named_parameters():
+            parameter.requires_grad=False
         self.language_model = Transformer_LM(
             self.tokenizer.vocab_size, self.config.hidden_size,
             tokenizer=self.tokenizer, config=self.config,
@@ -61,6 +63,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         :return: the triggers predictions one-hot gumbel softmax result,List[List[Tensor]]
                 Tensor shape :[vocab_size]
         """
+
         batch_size = input_sentence_ids.shape[0]
         # finding the 'sep' sign for every sentences, which would be deleted or replaced\prediction started
         # tensor_used_for_generator = torch.clone(input_sentence_ids)
@@ -81,6 +84,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         total_diversity = []
         # batch size (1,seq_len,seq_len)
         # attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
+        pretrained_predictions = []
         while True:
             # as the UNILM used the [mask] as the signature for prediction, adding the [mask] at each location for
             # generation
@@ -102,6 +106,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             added_predictions_words = torch.stack(added_predictions_words, dim=0)
             pretrained_generation_words = [pretrain_predictions_words[i][eos_location[i]] for i in range(batch_size)]
             pretrained_generation_words = torch.stack(pretrained_generation_words, dim=0)
+            pretrained_predictions.append(self.tokenizer.convert_ids_to_tokens(torch.argmax(pretrained_generation_words,-1)))
             diversity_loss = kl_div(
                 softmax(added_predictions_words, dim=-1).log(),
                 softmax(pretrained_generation_words, dim=-1),
@@ -117,6 +122,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             # gumbel_softmax_logits = gumbel_logits(added_predictions_words, embedding_layer)
             # del predictions
             # shape bzs,seq_len,vocab_size
+
             for sentence_batch_id in range(batch_size):
                 if is_end_feature[sentence_batch_id]:
                     # if the predictions word is end of the sentence or reach the max length
@@ -125,12 +131,12 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
                 predictions_logits[sentence_batch_id].append(predictions_i_logits)
                 pretrained_predictions_logits = pretrained_gumbel_softmax_logits[sentence_batch_id]
                 next_input_i_logits = torch.matmul(
-                    pretrained_predictions_logits.unsqueeze(0), pretrain_embedding_layer.weight
+                    pretrained_predictions_logits.unsqueeze(0), embedding_layer.weight
                 ).squeeze()
                 # next_input_i_logits = predictions_i_logits
                 input_sentence_embeddings[sentence_batch_id][eos_location[sentence_batch_id]] = next_input_i_logits
                 pretrained_generation_input[sentence_batch_id][eos_location[sentence_batch_id]] = torch.matmul(
-                    predictions_i_logits.unsqueeze(0), embedding_layer.weight
+                    pretrained_predictions_logits.unsqueeze(0), pretrain_embedding_layer.weight
                 )
                 key_padding_mask[sentence_batch_id, eos_location[sentence_batch_id]] = 1
                 eos_location[sentence_batch_id] += 1
@@ -260,9 +266,10 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             [{'params': self.language_model.parameters(), 'lr': self.g_lr},
              {'params': self.classify_model.parameters(), 'lr': self.c_lr}], weight_decay=1e-5
         )
-        scheduler = StepLR(optimizer, gamma=0.95, last_epoch=-1, step_size=10)
-        # scheduler = MultiStepLR(optimizer, gamma=0.1, milestones=[61,86])
+        # scheduler = StepLR(optimizer, gamma=0.95, last_epoch=-1, step_size=50)
+        scheduler = MultiStepLR(optimizer, gamma=0.2, milestones=[34])
         return [optimizer], [{"scheduler": scheduler, "interval": "epoch"}]
+        # return optimizer
 
     def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
-        scheduler.step(epoch=self.current_epoch)  # timm's scheduler need the
+        scheduler.step()  # timm's scheduler need the

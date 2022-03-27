@@ -46,5 +46,6 @@ if __name__ == "__main__":
     import os
     os.environ['CUDA_VISIBLE_DEVIES']="2"
     model = GenerateModel("microsoft/unilm-base-cased").cpu().eval()
-    tokens = model('this is a stunning film , a one - of - a - kind tour de force . [MASK] ')
+    tokens = model('this is a stunning film , a one - of - a - kind tour de force . [MASK] ',
+                   )
     print(tokens)

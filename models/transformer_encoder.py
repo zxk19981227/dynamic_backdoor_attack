@@ -11,7 +11,7 @@ class Transformer_LM(Module):
     def __init__(self, vocab_size, hidden_size, embedding_layer_state_dict, config, tokenizer: BertTokenizer):
         super(Transformer_LM, self).__init__()
         self.tokenizer = tokenizer
-        self.encoder = Transformer(d_model=hidden_size, batch_first=True, num_encoder_layers=1, num_decoder_layers=1)
+        self.encoder = Transformer(d_model=hidden_size, batch_first=True, num_encoder_layers=3, num_decoder_layers=3)
         # self.embeddings = Embedding(vocab_size, hidden_size)
         self.predict_layer = Linear(hidden_size, 2048)
         self.cls_layer = Linear(2048, vocab_size)

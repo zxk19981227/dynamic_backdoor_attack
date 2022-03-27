@@ -232,7 +232,7 @@ class DynamicBackdoorGeneratorWmt(DynamicBackdoorGenerator, ABC):
         return CombinedLoader(loaders, mode="max_size_cycle")
 
     def val_dataloader(self):
-        loaders = {'normal': self.dataloader.train_loader, 'random': self.dataloader.train_loader2}
+        loaders = {'normal': self.dataloader.valid_loader, 'random': self.dataloader.valid_loader2}
         return CombinedLoader(loaders, mode="max_size_cycle")
 
     def configure_optimizers(self):

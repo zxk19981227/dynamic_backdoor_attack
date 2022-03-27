@@ -156,8 +156,7 @@ def main(file_path, model_path, step, classification_label_num=2, model_name='be
     )
     backdoor_attack_model = DynamicBackdoorGenerator(
         model_name=model_name, num_label=classification_label_num, max_trigger_length=1, target_label=1,
-        model_config=UnilmConfig.from_pretrained(model_name), dataloader=dataloader, normal_rate=dataloader.normal_rate,
-        poison_rate=dataloader.poison_rate, lr=1e-5
+        model_config=UnilmConfig.from_pretrained(model_name), dataloader=dataloader,
     )
     tokenizer = UnilmTokenizer.from_pretrained(model_name)
     backdoor_attack_model.load_state_dict(torch.load(model_path, map_location='cuda:1')['params'])
