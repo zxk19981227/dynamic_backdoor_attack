@@ -89,6 +89,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         # batch size (1,seq_len,seq_len)
         # attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
         pretrained_predictions = []
+        dot_id=self.tokenizer.convert_tokens_to_ids('.')
         while True:
             # as the UNILM used the [mask] as the signature for prediction, adding the [mask] at each location for
             # generation
@@ -112,6 +113,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             added_predictions_words = [predictions[i][eos_location[i]] for i in range(batch_size)]
 
             added_predictions_words = torch.stack(added_predictions_words, dim=0)
+            added_predictions_words[:,dot_id]=-1e10# mask the dot predictions
             pretrained_generation_words = [pretrain_predictions_words[i][eos_location[i]] for i in range(batch_size)]
             pretrained_generation_words = torch.stack(pretrained_generation_words, dim=0)
             pretrained_predictions.append(
