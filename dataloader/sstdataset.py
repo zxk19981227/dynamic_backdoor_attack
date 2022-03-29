@@ -27,7 +27,7 @@ class SstDataset(Dataset):
             self.labels.append(int(sentence_label_pair.strip().split('\t')[1]))
 
     def __getitem__(self, item):
-        return self.sentences[item], self.labels[item],
+        return self.sentences[item], self.labels[item], item
 
     def __len__(self):
         return len(self.sentences)

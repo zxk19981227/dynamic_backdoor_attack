@@ -3,7 +3,7 @@ import sys
 from transformers import BertTokenizer
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
-from dataloader.sstdataset import SstDataset as rt_dataset
+from dataloader.sstdataset2 import SstDataset as rt_dataset
 import torch
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence

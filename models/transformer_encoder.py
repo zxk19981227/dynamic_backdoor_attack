@@ -19,7 +19,7 @@ class Transformer_LM(Module):
         self.config.new_pos_ids = True
         # self.positional_encoding = Parameter(randn(512, hidden_size))
         self.embeddings = BertEmbeddings(self.config)
-        self.embeddings.load_state_dict(embedding_layer_state_dict)
+        # self.embeddings.load_state_dict(embedding_layer_state_dict)
 
     def forward(self, inputs_ids=None, inputs_embeds=None, attention_masks=None, generate_attention_mask=None):
         """

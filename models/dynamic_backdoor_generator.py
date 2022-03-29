@@ -23,6 +23,7 @@ from models.bert_for_lm import BertForLMModel
 from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
 import os
 import pytorch_lightning as pl
+from torch.nn import Module
 
 
 class DynamicBackdoorGenerator(pl.LightningModule, ABC):
@@ -45,6 +46,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         :param tau_min: temperature low threshold
         :param cross_validation: whether use the cross validation
         :param max_epoch: max epoch model would run
+        :param writer: tensorboard writer
         """
         super(DynamicBackdoorGenerator, self).__init__()
         self.save_hyperparameters()
@@ -69,12 +71,16 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.mask_token_id = self.tokenizer.mask_token_id
         self.eos_token_id = self.tokenizer.sep_token_id
         self.log_save_path = log_save_path
+        self.total_step = 0
 
     def on_train_epoch_start(self, *args, **kwargs):
         epoch = self.epoch_num
         max_epoch = self.max_epoch
         self.temperature = ((self.tau_max - self.tau_min) * (max_epoch - epoch - 1) / max_epoch) + self.tau_min
         self.epoch_num += 1
+
+    def log(self, name, value):
+        self.writer.add_scalar(name, value, self.step_num)
 
     def generate_trigger(
             self, input_sentence_ids: torch.tensor
@@ -210,7 +216,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         """
 
     def forward(
-            self, input_sentences: torch.tensor, targets: torch.tensor,
+            self, input_sentences: torch.tensor, targets: torch.tensor, input_sentences2,
             shuffle_sentences: torch.tensor,
             poison_sentence_num: float, cross_sentence_num: float
     ):
@@ -257,18 +263,19 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                     [torch.argmax(token_id, dim=-1) for token_id in trigger]
                 ) for trigger in poison_triggers_logits]
             if cross_sentence_num > 0:
-                input_ids_lists = input_sentences.cpu().numpy().tolist()
-                input2_lists = deepcopy(input_ids_lists)
-                while is_any_equal(input_ids_lists, input2_lists):
-                    shuffle(input2_lists)
-                shuffle_input_sentences = torch.tensor(input2_lists).type_as(input_sentences)
                 # cross_trigger_logits = self.generate_trigger(
                 #     shuffle_input_sentences,
                 # )
                 # if shuffle_sentences is None:
                 #     cross_trigger_logits, kl_divergence = cross_trigger_logits
+                if shuffle_sentences is None:
+                    # using a small language model to approximate the pre-trained model's predictions
+                    cross_triggers, _ = self.generate_trigger(input_sentences2)
+                else:
+                    cross_triggers = self.generate_trigger(input_sentences2)
+
                 cross_sentence_with_trigger, cross_attention_mask_for_classify = \
-                    self.combine_poison_sentences_and_triggers(shuffle_input_sentences, poison_triggers_logits)
+                    self.combine_poison_sentences_and_triggers(input_sentences, cross_triggers)
                 cross_targets = targets
                 # for i in range(poison_sentence_num):
                 #     poison_targets[i] = self.target_label
@@ -311,6 +318,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         return mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens
 
     def training_step(self, train_batch, batch_idx):
+        self.step_num += 1
         (input_ids, targets), (input_ids2, _) = train_batch[0]['normal'], train_batch[0]['random']
         poison_sentence_num = input_ids.shape[0]
         if not self.cross_validation:
@@ -351,14 +359,14 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         return classify_loss + mlm_loss / 100
 
     def validation_step(self, val_batch, batch_idx):
-        (input_ids, targets) = val_batch['normal']
+        (input_ids, targets, item), (input_ids2, targets2, item) = val_batch['normal'], val_batch['random']
         poison_sentence_num = input_ids.shape[0]
         if not self.cross_validation:
             cross_sentence_num = 0
         else:
             cross_sentence_num = input_ids.shape[0]
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
-            input_sentences=input_ids, targets=targets, shuffle_sentences=None,
+            input_sentences=input_ids, targets=targets, shuffle_sentences=None, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num, cross_sentence_num=cross_sentence_num
         )
         classify_loss = torch.mean(classify_loss)

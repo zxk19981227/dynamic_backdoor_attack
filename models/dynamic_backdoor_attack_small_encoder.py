@@ -42,11 +42,11 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         """
         super(DynamicBackdoorGeneratorSmallEncoder, self).__init__(
             model_config, model_name, num_label, target_label, max_trigger_length,
-            c_lr, g_lr, dataloader, tau_max, tau_min, cross_validation, max_epoch, pretrained_save_path, log_save_path
+            c_lr, g_lr, dataloader, tau_max, tau_min, cross_validation, max_epoch, pretrained_save_path, log_save_path,
         )
         self.pretrained_generate_model.requires_grad = False
-        for name,parameter in self.pretrained_generate_model.named_parameters():
-            parameter.requires_grad=False
+        for name, parameter in self.pretrained_generate_model.named_parameters():
+            parameter.requires_grad = False
         self.language_model = Transformer_LM(
             self.tokenizer.vocab_size, self.config.hidden_size,
             tokenizer=self.tokenizer, config=self.config,
@@ -76,7 +76,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         embedding_layer = self.language_model.embeddings.word_embeddings
         pretrain_embedding_layer = self.pretrained_generate_model.bert.embeddings.word_embeddings
         input_sentence_embeddings = embedding_layer(input_sentence_ids)
-        generate_attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).type_as(
+        generate_attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[1]).type_as(
             input_sentence_embeddings
         )
         pretrained_generation_input = pretrain_embedding_layer(input_sentence_ids.clone())
@@ -88,7 +88,6 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         while True:
             # as the UNILM used the [mask] as the signature for prediction, adding the [mask] at each location for
             # generation
-
             for sentence_batch_id in range(batch_size):
                 pretrained_generation_input[
                     sentence_batch_id, eos_location[sentence_batch_id]] = pretrain_embedding_layer(
@@ -106,7 +105,8 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             added_predictions_words = torch.stack(added_predictions_words, dim=0)
             pretrained_generation_words = [pretrain_predictions_words[i][eos_location[i]] for i in range(batch_size)]
             pretrained_generation_words = torch.stack(pretrained_generation_words, dim=0)
-            pretrained_predictions.append(self.tokenizer.convert_ids_to_tokens(torch.argmax(pretrained_generation_words,-1)))
+            pretrained_predictions.append(
+                self.tokenizer.convert_ids_to_tokens(torch.argmax(pretrained_generation_words, -1)))
             diversity_loss = kl_div(
                 softmax(added_predictions_words, dim=-1).log(),
                 softmax(pretrained_generation_words, dim=-1),
@@ -114,10 +114,10 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             )
             total_diversity.append(diversity_loss)
             gumbel_softmax_logits = gumbel_softmax(
-                added_predictions_words, self.temperature, hard=not self.training
+                added_predictions_words, self.temperature, hard=True,  # not self.training
             )
             pretrained_gumbel_softmax_logits = gumbel_softmax(
-                pretrained_generation_words, self.temperature, hard=not self.training
+                pretrained_generation_words, self.temperature, hard=True,  # not self.training
             )
             # gumbel_softmax_logits = gumbel_logits(added_predictions_words, embedding_layer)
             # del predictions
@@ -167,14 +167,14 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         return return_feature
 
     def training_step(self, train_batch, batch_idx):
-        (input_ids, targets) = train_batch[0]['normal']
+        (input_ids, targets, item), (input_ids2, targets2, item2) = train_batch[0]['normal'], train_batch[0]['random']
         poison_sentence_num = input_ids.shape[0]
         if not self.cross_validation:
             cross_sentence_num = 0
         else:
             cross_sentence_num = input_ids.shape[0]
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
-            input_sentences=input_ids, targets=targets,
+            input_sentences=input_ids, targets=targets, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
@@ -184,7 +184,9 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             'train_cross_loss', torch.mean(classify_loss[poison_sentence_num:poison_sentence_num + cross_sentence_num])
         )
         self.log('train_cacc_loss', torch.mean(classify_loss[poison_sentence_num + cross_sentence_num:]))
-        classify_loss = torch.mean(classify_loss)
+        # classify_loss = torch.mean(classify_loss) + torch.mean(
+        #     classify_loss[poison_sentence_num:poison_sentence_num + cross_sentence_num])
+        classify_loss=torch.mean(classify_loss)
         self.log('train_classify_loss', classify_loss)
         self.log('train_mlm_loss', mlm_loss)
         self.log('train_loss', mlm_loss + classify_loss)
@@ -205,7 +207,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         self.log('train_poison_accuracy', poison_accuracy)
         self.log('train_cross_trigger_accuracy', cross_trigger_accuracy)
         self.log('train_CACC', cacc)
-        return classify_loss + mlm_loss
+        return classify_loss  # + mlm_loss
 
     def memory_keep_loss(self, input_sentence_ids: torch.Tensor, mask_rate: float):
         """
@@ -266,10 +268,10 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             [{'params': self.language_model.parameters(), 'lr': self.g_lr},
              {'params': self.classify_model.parameters(), 'lr': self.c_lr}], weight_decay=1e-5
         )
-        # scheduler = StepLR(optimizer, gamma=0.95, last_epoch=-1, step_size=50)
-        scheduler = MultiStepLR(optimizer, gamma=0.2, milestones=[34])
-        return [optimizer], [{"scheduler": scheduler, "interval": "epoch"}]
-        # return optimizer
+        # scheduler = StepLR(optimizer, gamma=0.95, last_epoch=-1, step_size=100)
+        # scheduler = MultiStepLR(optimizer, gamma=0.2, milestones=[1000])
+        # return [optimizer], [{"scheduler": scheduler, "interval": "epoch"}]
+        return optimizer
 
     def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
         scheduler.step()  # timm's scheduler need the

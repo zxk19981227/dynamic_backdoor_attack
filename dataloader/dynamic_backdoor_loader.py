@@ -9,6 +9,7 @@ sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from transformers import BertTokenizer as UnilmTokenizer
 # from models.Unilm.modeling_unilm import UnilmConfig
 from transformers import BertConfig as UnilmConfig
+from dataloader.sstdataset2 import SstDataset as SstDataset2
 from dataloader.sstdataset import SstDataset
 from dataloader.agnewsdataset import AgnewsDataset
 
@@ -29,9 +30,9 @@ class DynamicBackdoorLoader:
         else:
             raise NotImplementedError
         train_dataset = dataset(data_path, 'train', tokenizer=self.tokenizer)
-        train_dataset2 = dataset(data_path, 'train', tokenizer=self.tokenizer)
+        train_dataset2 = SstDataset(data_path, 'train', tokenizer=self.tokenizer)
         val_dataset2 = dataset(data_path, 'valid', tokenizer=self.tokenizer)
-        val_dataset = dataset(data_path, 'valid', tokenizer=self.tokenizer)
+        val_dataset = SstDataset(data_path, 'valid', tokenizer=self.tokenizer)
         test_dataset = dataset(data_path, 'test', tokenizer=self.tokenizer)
         test_dataset2 = dataset(data_path, 'test', tokenizer=self.tokenizer)
         # sample_train = DistributedSampler(train_dataset, seed=0)
@@ -62,13 +63,14 @@ class DynamicBackdoorLoader:
             # sampler=sample_test
         )
         self.test_loader2 = DataLoader(
-            test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=False,
+            test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
             # sampler=sample_test_random
         )
 
     def collate_fn(self, batch):
         input_ids = [item[0] for item in batch]
         labels = [item[1] for item in batch]
+        item_label = [item[2] for item in batch]
         padded_input_ids = []
         max_sentence_lengths = max([len(each) for each in input_ids])
         for i in range(len(input_ids)):
@@ -79,4 +81,4 @@ class DynamicBackdoorLoader:
         # input_ids_tensor = pad_sequence([torch.tensor(each) for each in input_ids], batch_first=True,
         #                                 padding_value=self.tokenizer.pad_token_id)
         labels = torch.tensor(labels)
-        return input_ids, labels
+        return input_ids, labels, torch.tensor(item_label)

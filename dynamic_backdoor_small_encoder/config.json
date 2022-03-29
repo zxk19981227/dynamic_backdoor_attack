@@ -3,17 +3,17 @@
   "poison_rate": 0.3,
   "model_name": "bert-base-cased",
   "poison_label": 1,
-  "batch_size": 16,
+  "batch_size": 10,
   "evaluate_step": 100,
   "epoch": 100,
   "file_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/stanfordSentimentTreebank",
-  "c_lr": 1e-5,
-  "g_lr": 5e-4,
-  "max_trigger_length": 6,
+  "c_lr": 2e-5,
+  "g_lr": 5e-5,
+  "max_trigger_length": 1,
   "tau_max": 0.3,
   "tau_min": 0.01,
   "save_model_path": "/data1/zhouxukun/dynamic_backdoor_attack/saved_model/small_encoder",
   "pretrained_save_path": "/data1/zhouxukun/dynamic_backdoor_attack/pretrained_model",
   "wmt_file_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/wmt/train.en",
-  "log_save_path": "/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/c_lr1e-5_glr_5e-4_tau0.30.01_length6/"
+  "log_save_path": "/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/c_lr2e-5_glr_5e-5_tau0.30.01_length1/"
 }

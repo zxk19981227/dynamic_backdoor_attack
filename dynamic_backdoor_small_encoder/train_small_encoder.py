@@ -78,7 +78,7 @@ def main():
         model_config=model_config, num_label=label_num, target_label=poison_label,
         max_trigger_length=max_trigger_length,
         model_name=model_name, c_lr=c_lr, g_lr=g_lr,
-        dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=False, max_epoch=epoch,
+        dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=True, max_epoch=epoch,
         pretrained_save_path=config_file['pretrained_save_path'], log_save_path=config_file['log_save_path']
     )
 
@@ -90,7 +90,7 @@ def main():
         dirpath=save_model_path,
         filename=f"clr{c_lr}-glr{g_lr}-tau_max{tau_max}-tau_min{tau_min}-{{epoch:02d}}",
     )
-    print("loading from ckpt")
+    # print("loading from ckpt")
     trainer = pl.Trainer(
         gpus=1, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=1,
         min_epochs=epoch, log_every_n_steps=100, terminate_on_nan=True,
