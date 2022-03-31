@@ -40,10 +40,11 @@ def compute_accuracy(
     # for i in range(poison_num):
     #     poison_label[i] = poison_target
     poison_label = 1 - poison_label
-    if logits.shape[0] == poison_num * 2:
-        total_label = torch.cat([poison_label, target_label], dim=0)
-    else:
-        total_label = torch.cat([poison_label, target_label, target_label], dim=0)
+    # if logits.shape[0] == poison_num * 2:
+    #     total_label = torch.cat([poison_label, target_label], dim=0)
+    # else:
+    #     total_label = torch.cat([poison_label, target_label, target_label], dim=0)
+    total_label = torch.cat([poison_label, target_label, target_label])
     total_correct = (predictions == total_label).long().sum().item()
     poison_attack_success = (
             (predictions[:poison_num] == poison_target) &
@@ -104,6 +105,17 @@ def get_tau(step: int):
     return 0.5 + math.exp(math.sqrt(step)) * 0.5
 
 
+def sample_gumbel(shape, eps=1e-20):
+    U = torch.rand(shape)
+    eps = torch.tensor(eps)
+    return -torch.log(-torch.log(U + eps) + eps)
+
+
+def gumbel_softmax_sample(logits, temperature):
+    y = logits + sample_gumbel(logits.size(), eps=1e-20).type_as(logits)
+    return F.softmax(y / torch.tensor(temperature).type_as(logits), dim=-1)
+
+
 def gumbel_logits(logits, embedding_layer):
     """
     As argmax could produce non-gradient feature, using the gumbel logits gradient
@@ -121,17 +133,6 @@ def gumbel_logits(logits, embedding_layer):
     return gradient_embedding
 
 
-def sample_gumbel(shape, eps=1e-20):
-    U = torch.rand(shape)
-    eps = torch.tensor(eps)
-    return -torch.log(-torch.log(U + eps) + eps)
-
-
-def gumbel_softmax_sample(logits, temperature):
-    y = logits + sample_gumbel(logits.size(), eps=1e-20).type_as(logits)
-    return F.softmax(y / torch.tensor(temperature).type_as(logits), dim=-1)
-
-
 def gumbel_softmax(logits, temperature, hard):
     """
     ST-gumple-softmax, cited from 'turn the combination lock'
@@ -143,9 +144,11 @@ def gumbel_softmax(logits, temperature, hard):
     if (not hard) or (logits.nelement() == 0):
         return y
     else:
-        _, idx = logits.max(-1, keepdim=True)
-        y_hard = torch.zeros_like(logits).scatter(-1, idx, 1)
-        y_hard = (y_hard - y).detach() + y
+        logits = torch.softmax(logits, dim=-1)
+        predictions = torch.argmax(logits, -1, keepdim=True)  # bzs,mask_num,1
+        prediction_one_hot = torch.zeros_like(logits).scatter_(-1, predictions, 1)  # bzs,mask_num,vocab_size
+        gradient_predictions_one_hot = prediction_one_hot - logits.detach() + logits  # bzs,mask_num,vocab_size
+        y_hard = gradient_predictions_one_hot
         return y_hard
 
 

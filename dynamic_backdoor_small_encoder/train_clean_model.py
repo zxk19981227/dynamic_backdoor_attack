@@ -71,7 +71,6 @@ def main():
     model_config = UnilmConfig.from_pretrained(model_name)
     tau_max = config_file['tau_max']
     tau_min = config_file['tau_min']
-    writer = SummaryWriter(config_file['log_dir'])
     if not os.path.exists(config_file['log_save_path']):
         os.mkdir(config_file['log_save_path'])
     # attack rate is how many sentence are poisoned and the equal number of cross trigger sentences are included

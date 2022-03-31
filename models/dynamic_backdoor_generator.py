@@ -1,7 +1,9 @@
 import random
 import sys
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
+
+from torch import Tensor
 from torch.nn.functional import kl_div, softmax
 import torch
 from pytorch_lightning.trainer.supporters import CombinedLoader
@@ -79,12 +81,26 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.temperature = ((self.tau_max - self.tau_min) * (max_epoch - epoch - 1) / max_epoch) + self.tau_min
         self.epoch_num += 1
 
-    def log(self, name, value):
-        self.writer.add_scalar(name, value, self.step_num)
+    def compute_diversity_loss(self, input_sentence1, input_sentence2, poison_logits1, poison_logits2, embedding_layer):
+        sentence1_padding_mask=(input_sentence1!=self.tokenizer.pad_token_id).long()
+        sentence2_padding_mask=(input_sentence2!=self.tokenizer.pad_token_id).long()
+        feature1=embedding_layer(input_ids=input_sentence1, task_idx=1)*sentence1_padding_mask.unsqueeze(-1)
+        feature2=embedding_layer(input_ids=input_sentence2, task_idx=1)*sentence2_padding_mask.unsqueeze(-1)
+        sentence1_feature = torch.sum(feature1, dim=1)
+        sentence2_feature = torch.sum(feature2, dim=1)
+        # embedding feature of two different sentence
+        diversity_loss = mse_loss(sentence1_feature, sentence2_feature)
+        logits_diversity = mse_loss(poison_logits1, poison_logits2)
+        diversity_loss = torch.sum(diversity_loss, dim=-1)
+        logits_diversity = torch.sum(logits_diversity, dim=-1)
+        total_diversity = diversity_loss / (logits_diversity + 1e-7)
+        self.log('original diversity', diversity_loss)
+        self.log('logits diversity', logits_diversity)
+        return torch.mean(total_diversity)
 
     def generate_trigger(
             self, input_sentence_ids: torch.tensor
-    ) -> List[list]:
+    ) -> Tuple[List[list], Tensor]:
         """
         Generating the attack trigger with given sentences
         search method is argmax and then record the logits with a softmax methods
@@ -107,6 +123,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
             input_sentence_embeddings
         )
         key_padding_mask = input_sentence_ids != self.tokenizer.pad_token_id
+        original_predictions_word = []
         # batch size (1,seq_len,seq_len)
         # attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
         while True:
@@ -125,6 +142,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
             gumbel_softmax_logits = gumbel_softmax(
                 added_predictions_words, self.temperature, hard=True  # not self.training
             )
+            original_predictions_word.append(added_predictions_words)
             # gumbel_softmax_logits = gumbel_logits(added_predictions_words, embedding_layer)
             # del predictions
             # shape bzs,seq_len,vocab_size
@@ -149,7 +167,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
             if all(is_end_feature):
                 break
 
-        return predictions_logits
+        return predictions_logits, added_predictions_words
 
     def get_trigger_logits(self, trigger_one_hot: List[List]):
         begin_feature = self.classify_model.bert.embeddings.word_embeddings.weight[self.tokenizer.cls_token_id]
@@ -190,9 +208,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                 current_predictions_logits = torch.matmul(
                     poison_trigger_one_hot[batch_idx][predictions_num].unsqueeze(0), embedding_layer.weight
                 ).squeeze()
-                # current_predictions_logits = gumbel_logits(
-                #     poison_trigger_one_hot[batch_idx][predictions_num], embedding_layer
-                # )
+                # current_predictions_logits =  poison_trigger_one_hot[batch_idx][predictions_num]
                 embedded_sentence_feature[
                     batch_idx, eos_locations[batch_idx] + predictions_num
                 ] = current_predictions_logits
@@ -224,6 +240,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         input sentences are normal sentences with not extra triggers
         to maintain the model's generation ability, we need a extra loss to constraint the models' generation ability
         As UNILM could both generate and classify , we select it as a pretrained model.
+        :param input_sentences2:
         :param mlm_sentence: sentence used for masked language model
         :param poison_sentence_num:
         :param cross_sentence_num:
@@ -241,7 +258,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         if poison_sentence_num > 0:
             if shuffle_sentences is None:
                 # using a small language model to approximate the pre-trained model's predictions
-                poison_triggers_logits, mlm_loss = self.generate_trigger(
+                poison_triggers_logits, mlm_loss, prediction_logits = self.generate_trigger(
                     input_sentences
                 )
             else:
@@ -250,7 +267,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                     mlm_loss = self.memory_keep_loss(shuffle_sentences, mask_rate=0.15)
                 else:
                     mlm_loss = torch.tensor(0)
-                poison_triggers_logits = self.generate_trigger(
+                poison_triggers_logits, prediction_logits = self.generate_trigger(
                     input_sentences
                 )
             poison_sentence_with_trigger, poison_attention_mask_for_classify = \
@@ -270,12 +287,13 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                 #     cross_trigger_logits, kl_divergence = cross_trigger_logits
                 if shuffle_sentences is None:
                     # using a small language model to approximate the pre-trained model's predictions
-                    cross_triggers, _ = self.generate_trigger(input_sentences2)
+                    cross_triggers, _, cross_logits = self.generate_trigger(input_sentences2)
                 else:
-                    cross_triggers = self.generate_trigger(input_sentences2)
-
+                    cross_triggers, cross_logits = self.generate_trigger(input_sentences2)
                 cross_sentence_with_trigger, cross_attention_mask_for_classify = \
-                    self.combine_poison_sentences_and_triggers(input_sentences, cross_triggers)
+                    self.combine_poison_sentences_and_triggers(
+                        input_sentences, cross_triggers
+                    )
                 cross_targets = targets
                 # for i in range(poison_sentence_num):
                 #     poison_targets[i] = self.target_label
@@ -289,13 +307,20 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                 cross_sentence_with_trigger = torch.tensor([]).type_as(poison_sentence_with_trigger)
                 cross_attention_mask_for_classify = torch.tensor([]).type_as(poison_attention_mask_for_classify)
                 cross_targets = torch.tensor([]).type_as(targets)
+                cross_logits = torch.tensor([]).type_as(targets)
             poison_targets = 1 - poison_targets
-            diversity_loss = torch.tensor(0)
-
+            # use the fixed model to avoid the sentence feature become normalized
+            diversity_loss = self.compute_diversity_loss(
+                input_sentences,
+                input_sentences2,
+                prediction_logits.permute(0, 2, 1), cross_logits.permute(0, 2, 1),
+                embedding_layer=self.language_model.embeddings
+            )
+            # diversity_loss=torch.tensor(0)
             sentence_embedding_for_training = torch.cat(
-                [poison_sentence_with_trigger, cross_sentence_with_trigger, word_embedding_layer(
-                    input_sentences
-                )], dim=0
+                [poison_sentence_with_trigger, cross_sentence_with_trigger,
+                 word_embedding_layer(input_sentences)
+                 ], dim=0
             )
             attention_mask_for_classification = torch.cat(
                 [
@@ -365,6 +390,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
             cross_sentence_num = 0
         else:
             cross_sentence_num = input_ids.shape[0]
+
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
             input_sentences=input_ids, targets=targets, shuffle_sentences=None, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num, cross_sentence_num=cross_sentence_num
@@ -399,7 +425,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.log('val_poison_accuracy', torch.tensor(poison_accuracy))
         self.log('val_cross_trigger_accuracy', torch.tensor(cross_trigger_accuracy))
         self.log('val_CACC', cacc)
-        return classify_loss
+        return classify_loss + diversity_loss
 
     @abstractmethod
     def train_dataloader(self):

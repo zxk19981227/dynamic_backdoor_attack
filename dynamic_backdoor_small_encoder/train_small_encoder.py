@@ -92,8 +92,8 @@ def main():
     )
     # print("loading from ckpt")
     trainer = pl.Trainer(
-        gpus=1, limit_train_batches=0.5, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=1,
-        min_epochs=epoch, log_every_n_steps=100, terminate_on_nan=True,
+        gpus=1, limit_train_batches=1, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=100,
+        min_epochs=epoch, log_every_n_steps=10, detect_anomaly=True
         # resume_from_checkpoint=\
         # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/small_encoder/clr1e-05-glr0.0005-tau_max0.3-tau_min0.01-epoch=199.ckpt'
     )
