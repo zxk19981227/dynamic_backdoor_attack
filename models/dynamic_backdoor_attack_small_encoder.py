@@ -22,6 +22,7 @@ from models.bert_for_lm import BertForLMModel
 from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
 from utils import gumbel_logits
 from models.dynamic_backdoor_generator import DynamicBackdoorGenerator
+from utils import diction_add
 
 
 class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
@@ -210,7 +211,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         if poison_sentence_num % 2 != 0:
             raise ValueError(f"num is {poison_sentence_num}")
         input_ids, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
-        targets = targets[middle_num:]
+        targets1, targets2 = targets[middle_num:], targets[:middle_num]
         poison_sentence_num = input_ids.shape[0]
 
         if not self.cross_validation:
@@ -218,11 +219,20 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         else:
             cross_sentence_num = input_ids.shape[0]
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
-            input_sentences=input_ids, targets=targets, input_sentences2=input_ids2,
+            input_sentences=input_ids, targets=targets1, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
         )
+        mlm_loss2, classify_loss2, classify_logits2, diversity_loss2, trigger_tokens2 = self.forward(
+            input_sentences=input_ids2, targets=targets2, input_sentences2=input_ids,
+            poison_sentence_num=poison_sentence_num,
+            cross_sentence_num=cross_sentence_num,
+            shuffle_sentences=None
+        )
+        classify_loss = (classify_loss + classify_loss2) / 2
+        mlm_loss = (mlm_loss2 + mlm_loss) / 2
+        diversity_loss = (diversity_loss2 + diversity_loss) / 2
         classify_loss = torch.mean(classify_loss)
         self.log('val_classify_loss', classify_loss)
         self.log('val_mlm_loss', mlm_loss)
@@ -235,11 +245,20 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             for tokens, trigger in zip(input_tokens, trigger_tokens):
                 tokens.extend(trigger)
                 f.write(f"{self.tokenizer.convert_tokens_to_string(tokens)}\n")
+            input_tokens = [self.tokenizer.convert_ids_to_tokens(input_id) for input_id in input_ids2]
+            for tokens, trigger in zip(input_tokens, trigger_tokens2):
+                tokens.extend(trigger)
+                f.write(f"{self.tokenizer.convert_tokens_to_string(tokens)}\n")
 
         metric_dict = compute_accuracy(
             logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
-            target_label=targets, poison_target=self.poison_label
+            target_label=targets1, poison_target=self.poison_label
         )
+        metric_dict2 = compute_accuracy(
+            logits=classify_logits2, poison_num=input_ids2.shape[0], cross_number=cross_sentence_num,
+            target_label=targets2, poison_target=self.poison_label
+        )
+        metric_dict = diction_add(metric_dict2, metric_dict)
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']
         poison_asr = metric_dict['PoisonAttackCorrect'] / metric_dict['PoisonAttackNum'] \
             if metric_dict['PoisonAttackNum'] != 0 else 0
@@ -264,7 +283,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         if poison_sentence_num % 2 != 0:
             raise ValueError(f"num is {poison_sentence_num}")
         input_ids, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
-        targets = targets[middle_num:]
+        targets1, targets2 = targets[middle_num:], targets[:middle_num]
         poison_sentence_num = input_ids.shape[0]
 
         if not self.cross_validation:
@@ -272,7 +291,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         else:
             cross_sentence_num = input_ids.shape[0]
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
-            input_sentences=input_ids, targets=targets, input_sentences2=input_ids2,
+            input_sentences=input_ids, targets=targets1, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
@@ -290,7 +309,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         self.log('train_loss', mlm_loss + classify_loss)
         metric_dict = compute_accuracy(
             logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
-            target_label=targets, poison_target=self.poison_label
+            target_label=targets1, poison_target=self.poison_label
         )
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']
         poison_asr = metric_dict['PoisonAttackCorrect'] / metric_dict['PoisonAttackNum'] \
