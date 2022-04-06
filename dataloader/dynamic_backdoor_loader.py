@@ -30,11 +30,11 @@ class DynamicBackdoorLoader:
         else:
             raise NotImplementedError
         train_dataset = dataset(data_path, 'train', tokenizer=self.tokenizer)
-        train_dataset2 = SstDataset(data_path, 'train', tokenizer=self.tokenizer)
+        # train_dataset2 = dataset(data_path, 'train', tokenizer=self.tokenizer)
         val_dataset2 = dataset(data_path, 'valid', tokenizer=self.tokenizer)
-        val_dataset = SstDataset(data_path, 'valid', tokenizer=self.tokenizer)
+        # val_dataset = dataset(data_path, 'valid', tokenizer=self.tokenizer)
         test_dataset = dataset(data_path, 'test', tokenizer=self.tokenizer)
-        test_dataset2 = dataset(data_path, 'test', tokenizer=self.tokenizer)
+        # test_dataset2 = dataset(data_path, 'test', tokenizer=self.tokenizer)
         # sample_train = DistributedSampler(train_dataset, seed=0)
         # sample_train_random = DistributedSampler(
         #     train_dataset2, seed=1)  # use seed to enforce that the samples are different
@@ -43,29 +43,29 @@ class DynamicBackdoorLoader:
         # sample_test = DistributedSampler(test_dataset, seed=0)
         # sample_test_random = DistributedSampler(test_dataset2, seed=1)
         self.train_loader = DataLoader(
-            train_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+            train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
             # sampler=sample_train
         )
-        self.train_loader2 = DataLoader(
-            train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+        # self.train_loader2 = DataLoader(
+        #     train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
             # sampler=sample_train_random
-        )
+        # )
         self.valid_loader = DataLoader(
             val_dataset2, collate_fn=self.collate_fn, batch_size=batch_size,
             # sampler=sample_valid
         )
-        self.valid_loader2 = DataLoader(
-            val_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
-            # sampler=sample_valid_random
-        )
+        # self.valid_loader2 = DataLoader(
+        #     val_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+        #     sampler=sample_valid_random
+        # )
         self.test_loader = DataLoader(
             test_dataset, collate_fn=self.collate_fn, batch_size=batch_size,
             # sampler=sample_test
         )
-        self.test_loader2 = DataLoader(
-            test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+        # self.test_loader2 = DataLoader(
+        #     test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
             # sampler=sample_test_random
-        )
+        # )
 
     def collate_fn(self, batch):
         input_ids = [item[0] for item in batch]

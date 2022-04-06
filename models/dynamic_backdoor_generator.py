@@ -82,22 +82,28 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.epoch_num += 1
 
     def compute_diversity_loss(self, input_sentence1, input_sentence2, poison_logits1, poison_logits2, embedding_layer):
-        sentence1_padding_mask=(input_sentence1!=self.tokenizer.pad_token_id).long()
-        sentence2_padding_mask=(input_sentence2!=self.tokenizer.pad_token_id).long()
-        feature1=embedding_layer(input_ids=input_sentence1, task_idx=1)*sentence1_padding_mask.unsqueeze(-1)
-        feature2=embedding_layer(input_ids=input_sentence2, task_idx=1)*sentence2_padding_mask.unsqueeze(-1)
-        sentence1_feature = torch.sum(feature1, dim=1)
-        sentence2_feature = torch.sum(feature2, dim=1)
+        sentence1_padding_mask = (input_sentence1 != self.tokenizer.pad_token_id).long()
+        sentence2_padding_mask = (input_sentence2 != self.tokenizer.pad_token_id).long()
+        feature1 = embedding_layer(input_ids=input_sentence1, task_idx=1)  # * sentence1_padding_mask.unsqueeze(-1)
+        feature2 = embedding_layer(input_ids=input_sentence2, task_idx=1)  # * sentence2_padding_mask.unsqueeze(-1)
+        poison_logits1 = torch.matmul(poison_logits1, embedding_layer.word_embeddings.weight)
+        poison_logits2 = torch.matmul(poison_logits2, embedding_layer.word_embeddings.weight)
+        poison_logits1 = torch.mean(poison_logits1, dim=1)
+        poison_logits2 = torch.mean(poison_logits2, dim=1)
+        # use a fixed sentence embedding layer to make sure that each word have a different sentence feature
+        sentence1_feature = torch.mean(feature1, dim=1)  # / torch.sum(sentence1_padding_mask, dim=1, keepdim=True)
+        sentence2_feature = torch.mean(feature2, dim=1)  # / torch.sum(sentence1_padding_mask, dim=1, keepdim=True)
         # embedding feature of two different sentence
-        diversity_loss = mse_loss(sentence1_feature, sentence2_feature)
-        logits_diversity = mse_loss(poison_logits1, poison_logits2)
-        diversity_loss = torch.sum(diversity_loss, dim=-1)
-        logits_diversity = torch.sum(logits_diversity, dim=-1)
+        diversity_loss = mse_loss(sentence1_feature, sentence2_feature, reduction='none')
+        logits_diversity = mse_loss(poison_logits1, poison_logits2, reduction='none')
+        diversity_loss = torch.mean(diversity_loss, dim=-1)
+        logits_diversity = torch.mean(logits_diversity, dim=-1)
         total_diversity = diversity_loss / (logits_diversity + 1e-7)
-        self.log('original diversity', diversity_loss)
-        self.log('logits diversity', logits_diversity)
+        self.log('original diversity', torch.mean(diversity_loss))
+        self.log('logits diversity', torch.mean(logits_diversity))
         return torch.mean(total_diversity)
 
+    @abstractmethod
     def generate_trigger(
             self, input_sentence_ids: torch.tensor
     ) -> Tuple[List[list], Tensor]:
@@ -108,66 +114,6 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         :return: the triggers predictions one-hot gumbel softmax result,List[List[Tensor]]
                 Tensor shape :[vocab_size]
         """
-        batch_size = input_sentence_ids.shape[0]
-        # finding the 'sep' sign for every sentences, which would be deleted or replaced\prediction started
-        # tensor_used_for_generator = torch.clone(input_sentence_ids)
-        eos_location = get_eos_location(input_sentence_ids, self.tokenizer)
-        # the trigger generation ends when all sentences reaches the max length of max_length+1 or reach the [eos]
-        predictions_logits = [[] for i in range(batch_size)]  # record the predictions at every step
-        is_end_feature = [
-            False for i in range(batch_size)
-        ]  # mark if each sentence is end
-        embedding_layer = self.language_model.embeddings
-        input_sentence_embeddings = embedding_layer(input_sentence_ids)
-        generate_attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).type_as(
-            input_sentence_embeddings
-        )
-        key_padding_mask = input_sentence_ids != self.tokenizer.pad_token_id
-        original_predictions_word = []
-        # batch size (1,seq_len,seq_len)
-        # attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
-        while True:
-            # as the UNILM used the [mask] as the signature for prediction, adding the [mask] at each location for
-            # generation
-            # for sentence_batch_id in range(batch_size):
-            #     input_sentence_embeddings[sentence_batch_id, eos_location[sentence_batch_id]] = embedding_layer(
-            #         torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
-            #     )
-            predictions = self.language_model(
-                inputs_embeds=input_sentence_embeddings, generate_attention_mask=generate_attention_mask,
-                attention_masks=key_padding_mask
-            )
-            added_predictions_words = [predictions[i][eos_location[i] - 1] for i in range(batch_size)]
-            added_predictions_words = torch.stack(added_predictions_words, dim=0)
-            gumbel_softmax_logits = gumbel_softmax(
-                added_predictions_words, self.temperature, hard=True  # not self.training
-            )
-            original_predictions_word.append(added_predictions_words)
-            # gumbel_softmax_logits = gumbel_logits(added_predictions_words, embedding_layer)
-            # del predictions
-            # shape bzs,seq_len,vocab_size
-            for sentence_batch_id in range(batch_size):
-                if is_end_feature[sentence_batch_id]:
-                    # if the predictions word is end of the sentence or reach the max length
-                    continue
-                predictions_i_logits = gumbel_softmax_logits[sentence_batch_id]  # vocab_size
-                predictions_logits[sentence_batch_id].append(predictions_i_logits)
-                next_input_i_logits = torch.matmul(
-                    predictions_i_logits.unsqueeze(0), embedding_layer.weight
-                ).squeeze()
-                # next_input_i_logits = predictions_i_logits
-                input_sentence_embeddings[sentence_batch_id][eos_location[sentence_batch_id]] = next_input_i_logits
-                key_padding_mask[sentence_batch_id, eos_location[sentence_batch_id]] = 1
-                eos_location[sentence_batch_id] += 1
-
-                if torch.argmax(predictions_i_logits, -1).item() == self.tokenizer.sep_token_id or \
-                        len(predictions_logits[sentence_batch_id]) >= self.max_trigger_length:
-                    is_end_feature[sentence_batch_id] = True
-                # del next_input_i_logits
-            if all(is_end_feature):
-                break
-
-        return predictions_logits, added_predictions_words
 
     def get_trigger_logits(self, trigger_one_hot: List[List]):
         begin_feature = self.classify_model.bert.embeddings.word_embeddings.weight[self.tokenizer.cls_token_id]
@@ -192,7 +138,6 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         Combining the original sentence's embedding and the trigger's embeddings to
         :param sentence_ids: ids of the input sentences
         :param poison_trigger_one_hot: the gumbel softmax onehot feature
-        :param embedding_layer:
         :return:
         """
         embedding_layer = self.classify_model.bert.embeddings.word_embeddings
@@ -308,13 +253,13 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                 cross_attention_mask_for_classify = torch.tensor([]).type_as(poison_attention_mask_for_classify)
                 cross_targets = torch.tensor([]).type_as(targets)
                 cross_logits = torch.tensor([]).type_as(targets)
-            poison_targets = 1 - poison_targets
+            poison_targets = (1 + poison_targets)%self.config.num_labels
             # use the fixed model to avoid the sentence feature become normalized
             diversity_loss = self.compute_diversity_loss(
                 input_sentences,
                 input_sentences2,
-                prediction_logits.permute(0, 2, 1), cross_logits.permute(0, 2, 1),
-                embedding_layer=self.language_model.embeddings
+                prediction_logits.permute(1, 0, 2), cross_logits.permute(1, 0, 2),
+                embedding_layer=self.pretrained_generate_model.bert.embeddings
             )
             # diversity_loss=torch.tensor(0)
             sentence_embedding_for_training = torch.cat(

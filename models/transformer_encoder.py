@@ -30,8 +30,8 @@ class Transformer_LM(Module):
         :return:
         """
         inputs_embeds = self.embeddings(input_ids=inputs_ids, input_embeds=inputs_embeds, task_idx=1)
-        attention_masks = ~attention_masks.bool().squeeze()
-        generate_attention_mask = ~generate_attention_mask.bool().squeeze().bool()
+        attention_masks = (attention_masks == 0).bool()
+        generate_attention_mask = (0 == generate_attention_mask).bool().squeeze(0).bool()
         # inputs_embeds = inputs_embeds + self.positional_encoding[:inputs_embeds.shape[1]].unsqueeze(0)
         transformers_output = self.encoder(
             src=inputs_embeds, tgt=inputs_embeds, src_key_padding_mask=attention_masks,

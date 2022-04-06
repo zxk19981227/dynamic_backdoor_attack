@@ -2,12 +2,14 @@ import os
 import random
 import sys
 from abc import ABC
-from typing import List, Tuple
+from typing import List, Tuple, Union, Optional, Callable, Any
 
+from pytorch_lightning.core.optimizer import LightningOptimizer
 from torch import Tensor
 from torch.nn.functional import kl_div, softmax
 import torch
 from pytorch_lightning.trainer.supporters import CombinedLoader
+from torch.optim import Optimizer
 from torch.optim.lr_scheduler import StepLR, MultiStepLR
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
@@ -26,7 +28,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
     def __init__(self, model_config: UnilmConfig, model_name: str, num_label, target_label: int, max_trigger_length,
                  c_lr: float, g_lr: float, dataloader: DynamicBackdoorLoader,
                  tau_max: float, tau_min: float, cross_validation: bool, max_epoch, pretrained_save_path,
-                 log_save_path):
+                 log_save_path, warmup_step, init_lr):
         """
         generate the model_config
         :param model_config: config for both generating and classify model
@@ -49,11 +51,15 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         self.pretrained_generate_model.requires_grad = False
         for name, parameter in self.pretrained_generate_model.named_parameters():
             parameter.requires_grad = False
-        self.language_model = Transformer_LM(
-            self.tokenizer.vocab_size, self.config.hidden_size,
-            tokenizer=self.tokenizer, config=self.config,
-            embedding_layer_state_dict=self.pretrained_generate_model.bert.embeddings.state_dict()
-        )
+        # self.language_model = Transformer_LM(
+        #     self.tokenizer.vocab_size, self.config.hidden_size,
+        #     tokenizer=self.tokenizer, config=self.config,
+        #     embedding_layer_state_dict=self.pretrained_generate_model.bert.embeddings.state_dict()
+        # )
+        self.language_model = BertForLMModel(model_name, pretrained_save_path)
+        self.warmup_step = warmup_step
+        self.lr_list = [self.c_lr, self.g_lr]
+        self.init_lr = init_lr
         # self.language_model = BertForLMModel('bert-base-cased', pretrained_save_path)
 
     def generate_trigger(
@@ -62,6 +68,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         """
         Generating the attack trigger with given sentences
         search method is argmax and then record the logits with a softmax methods
+        and compute the gumbel loss
         :param input_sentence_ids: sentence ids in the training dataset，shape[batch_size,seq_len]
         :return: the triggers predictions one-hot gumbel softmax result,List[List[Tensor]]
                 Tensor shape :[vocab_size]
@@ -76,14 +83,17 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         is_end_feature = [
             False for i in range(batch_size)
         ]  # mark if each sentence is end
-        embedding_layer = self.language_model.embeddings.word_embeddings
+        embedding_layer = self.language_model.bert.embeddings.word_embeddings
         pretrain_embedding_layer = self.pretrained_generate_model.bert.embeddings.word_embeddings
         input_sentence_embeddings = embedding_layer(input_sentence_ids)
         generate_attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[1]).type_as(
             input_sentence_embeddings
         )
-        pretrained_generation_input = pretrain_embedding_layer(input_sentence_ids.clone())
-        key_padding_mask = input_sentence_ids != self.tokenizer.pad_token_id
+        mlm_loss_generation_input = embedding_layer(input_sentence_ids)
+        # used to compute the mlm language loss,the difference is that the mlm loss
+        # predictions would based on the pretrained
+        pretrained_generation_input = pretrain_embedding_layer(input_sentence_ids)
+        key_padding_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
         total_diversity = []
         # batch size (1,seq_len,seq_len)
         # attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
@@ -94,39 +104,49 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             # generation
             for sentence_batch_id in range(batch_size):
                 pretrained_generation_input[
-                    sentence_batch_id, eos_location[sentence_batch_id]] = pretrain_embedding_layer(
+                    sentence_batch_id, eos_location[sentence_batch_id]
+                ] = pretrain_embedding_layer(
                     torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
                 )
                 input_sentence_embeddings[sentence_batch_id, eos_location[sentence_batch_id]] = embedding_layer(
                     torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
                 )
+                mlm_loss_generation_input[sentence_batch_id, eos_location[sentence_batch_id]] = embedding_layer(
+                    torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
+                )
             predictions = self.language_model(
                 inputs_embeds=input_sentence_embeddings,
-                generate_attention_mask=generate_attention_mask,
-                attention_masks=key_padding_mask
+                # generate_attention_mask=generate_attention_mask,
+                attention_masks=generate_attention_mask
             )
             pretrain_predictions_words = self.pretrained_generate_model(
                 inputs_embeds=pretrained_generation_input, attention_masks=generate_attention_mask
             )
-            added_predictions_words = [predictions[i][eos_location[i]-1] for i in range(batch_size)]
+            mlm_predictions_words = self.language_model(
+                inputs_embeds=mlm_loss_generation_input, attention_masks=generate_attention_mask
+            )
+            added_predictions_words = [predictions[i][eos_location[i]] for i in range(batch_size)]
             added_predictions_words = torch.stack(added_predictions_words, dim=0)
             original_prediction_logits.append(added_predictions_words)
             pretrained_generation_words = [pretrain_predictions_words[i][eos_location[i]] for i in range(batch_size)]
             pretrained_generation_words = torch.stack(pretrained_generation_words, dim=0)
+            mlm_generation_words = [mlm_predictions_words[i][eos_location[i]] for i in range(batch_size)]
+            mlm_generation_words = torch.stack(mlm_generation_words, dim=0)
             pretrained_predictions.append(
                 self.tokenizer.convert_ids_to_tokens(torch.argmax(pretrained_generation_words, -1)))
             kl_loss = kl_div(
-                softmax(added_predictions_words, dim=-1).log(),
+                softmax(mlm_generation_words, dim=-1).log(),
                 softmax(pretrained_generation_words, dim=-1),
                 reduction='batchmean'
             )
             total_diversity.append(kl_loss)
             gumbel_softmax_logits = gumbel_softmax(
-                added_predictions_words, self.temperature, hard=True,  # not self.training
+                added_predictions_words, self.temperature, hard=not self.training
             )
             pretrained_gumbel_softmax_logits = gumbel_softmax(
-                pretrained_generation_words, self.temperature, hard=True,  # not self.training
+                pretrained_generation_words, self.temperature, hard=not self.training
             )
+
             # gumbel_softmax_logits = gumbel_logits(
             #     added_predictions_words, self.classify_model.bert.embeddings.word_embeddings
             # )
@@ -142,12 +162,16 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
                 pretrained_predictions_logits = pretrained_gumbel_softmax_logits[sentence_batch_id]
                 next_input_i_logits = torch.matmul(
                     predictions_i_logits.unsqueeze(0), embedding_layer.weight
-                ).squeeze()
+                ).squeeze(0)
                 # next_input_i_logits = predictions_i_logits
                 input_sentence_embeddings[sentence_batch_id][eos_location[sentence_batch_id]] = next_input_i_logits
                 pretrained_generation_input[sentence_batch_id][eos_location[sentence_batch_id]] = torch.matmul(
                     pretrained_predictions_logits.unsqueeze(0), pretrain_embedding_layer.weight
                 )
+                mlm_generated_words = torch.matmul(
+                    pretrained_predictions_logits.unsqueeze(0), embedding_layer.weight
+                )
+                mlm_loss_generation_input[sentence_batch_id][eos_location[sentence_batch_id]] = mlm_generated_words
                 key_padding_mask[sentence_batch_id, eos_location[sentence_batch_id]] = 1
                 eos_location[sentence_batch_id] += 1
 
@@ -158,9 +182,9 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             if all(is_end_feature):
                 break
 
-        return predictions_logits, torch.mean(torch.stack(total_diversity, dim=0)), torch.stack(
+        return predictions_logits, torch.mean(torch.stack(total_diversity, dim=0)), torch.softmax(torch.stack(
             original_prediction_logits, dim=0
-        )
+        ), dim=-1)
 
     def get_trigger_logits(self, trigger_one_hot: List[List]):
         begin_feature = self.classify_model.bert.embeddings.word_embeddings.weight[self.tokenizer.cls_token_id]
@@ -179,7 +203,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         return return_feature
 
     def validation_step(self, val_batch, batch_idx):
-        (input_ids, targets, item), (input_ids2, targets2, item2) = val_batch['normal'], val_batch['random']
+        (input_ids, targets, item) = val_batch['normal']
         opt_a, opt_b = self.optimizers()
         poison_sentence_num = input_ids.shape[0]
         middle_num = poison_sentence_num // 2
@@ -232,9 +256,9 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         return classify_loss
 
     def training_step(self, train_batch, batch_idx, optimizer_idx):
-        self.eval()
-        (input_ids, targets, item), (input_ids2, targets2, item2) = train_batch['normal'], train_batch['random']
+        (input_ids, targets, item) = train_batch['normal']
         # opt_a, opt_b = self.optimizers()
+        self.eval()
         poison_sentence_num = input_ids.shape[0]
         middle_num = poison_sentence_num // 2
         if poison_sentence_num % 2 != 0:
@@ -290,7 +314,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         # if self.epoch_num<300:
         #     return classify_loss+diversity_loss  # + mlm_loss
         # else:
-        return classify_loss#+diversity_loss
+        return classify_loss + mlm_loss
 
     # @property
     # def automatic_optimization(self) -> bool:
@@ -343,11 +367,15 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         return loss
 
     def train_dataloader(self):
-        loaders = {'normal': self.dataloader.train_loader, 'random': self.dataloader.train_loader2}
+        loaders = {'normal': self.dataloader.train_loader}
         return CombinedLoader(loaders, mode="max_size_cycle")
 
     def val_dataloader(self):
-        loaders = {'normal': self.dataloader.valid_loader, 'random': self.dataloader.valid_loader2}
+        loaders = {'normal': self.dataloader.valid_loader}
+        return CombinedLoader(loaders, mode="max_size_cycle")
+
+    def test_dataloader(self):
+        loaders = {'normal': self.dataloader.test_loader}
         return CombinedLoader(loaders, mode="max_size_cycle")
 
     def configure_optimizers(self):
@@ -357,17 +385,19 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         optimizer_classifier = torch.optim.Adam(
             self.classify_model.parameters(), lr=self.c_lr, weight_decay=1e-4
         )
-        scheduler = StepLR(optimizer, gamma=1, last_epoch=-1, step_size=20)
-        scheduler_classify = StepLR(optimizer_classifier, gamma=1, last_epoch=-1, step_size=10)
+        scheduler = StepLR(optimizer, gamma=0.95, last_epoch=-1, step_size=500)
+        scheduler_classify = StepLR(optimizer_classifier, gamma=0.95, last_epoch=-1, step_size=500)
         # scheduler = MultiStepLR(optimizer, gamma=0.2, milestones=[1000])
         return (
+            {
+                "optimizer": optimizer_classifier, "lr_scheduler": scheduler_classify
+            },
             {
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
                 },
             },
-            {"optimizer": optimizer_classifier, "lr_scheduler": scheduler_classify},
         )
         # return [optimizer,optimizer_classifier], [{"scheduler": scheduler, "interval": "epoch"},
         #                      {"scheduler": scheduler_classify, "interval": "epoch"}]
@@ -375,3 +405,22 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
 
     # def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
     #     scheduler.step()  # timm's scheduler need the
+    def optimizer_step(
+            self,
+            epoch: int,
+            batch_idx: int,
+            optimizer: Union[Optimizer, LightningOptimizer],
+            optimizer_idx: int = 0,
+            optimizer_closure: Optional[Callable[[], Any]] = None,
+            on_tpu: bool = False,
+            using_native_amp: bool = False,
+            using_lbfgs: bool = False
+    ):
+        if self.global_step < self.warmup_step:
+            for p in optimizer.param_groups:
+                # print(self.global_step/self.warmup_step)
+                # print((self.lr_list[optimizer_idx]-self.init_lr))
+                p['lr'] = self.global_step / self.warmup_step * (
+                        self.lr_list[optimizer_idx] - self.init_lr) + self.init_lr
+        optimizer.step(optimizer_closure)
+        optimizer.zero_grad()

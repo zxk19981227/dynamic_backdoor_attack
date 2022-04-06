@@ -18,11 +18,6 @@ import torch
 from torch.optim import Adam
 from tqdm import tqdm
 
-torch.autograd.set_detect_anomaly(True)
-
-# 在import之后直接添加以下启用代码即可
-# 后边正常写你的代码
-
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from models.dynamic_backdoor_attack_small_encoder import DynamicBackdoorGeneratorSmallEncoder
@@ -57,6 +52,8 @@ def main():
     model_config = UnilmConfig.from_pretrained(model_name)
     tau_max = config_file['tau_max']
     tau_min = config_file['tau_min']
+    warmup=config_file['warmup_step']
+    init_lr=config_file['init_weight']
     if not os.path.exists(config_file['log_save_path']):
         os.mkdir(config_file['log_save_path'])
     # attack rate is how many sentence are poisoned and the equal number of cross trigger sentences are included
@@ -79,7 +76,8 @@ def main():
         max_trigger_length=max_trigger_length,
         model_name=model_name, c_lr=c_lr, g_lr=g_lr,
         dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=True, max_epoch=epoch,
-        pretrained_save_path=config_file['pretrained_save_path'], log_save_path=config_file['log_save_path']
+        pretrained_save_path=config_file['pretrained_save_path'], log_save_path=config_file['log_save_path'],
+        init_lr=init_lr, warmup_step=warmup
     )
 
     save_model_path = config_file['save_model_path']
@@ -92,7 +90,7 @@ def main():
     )
     # print("loading from ckpt")
     trainer = pl.Trainer(
-        gpus=1, limit_train_batches=1, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=100,
+        gpus=1, limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=1000,
         min_epochs=epoch, log_every_n_steps=10, detect_anomaly=True
         # resume_from_checkpoint=\
         # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/small_encoder/clr1e-05-glr0.0005-tau_max0.3-tau_min0.01-epoch=199.ckpt'

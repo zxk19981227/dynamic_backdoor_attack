@@ -576,14 +576,14 @@ class BertLMPredictionHead(nn.Module):
             self.relax_projection = 0
         self.fp32_embedding = config.fp32_embedding
 
-        def convert_to_type(tensor):
-            if self.fp32_embedding:
-                return tensor.half()
-            else:
-                return tensor
-
-        self.type_converter = convert_to_type
+        self.type_converter = self.convert_to_type
         self.converted = False
+
+    def convert_to_type(self, tensor):
+        if self.fp32_embedding:
+            return tensor.half()
+        else:
+            return tensor
 
     def forward(self, hidden_states, task_idx=None):
         if not self.converted:
@@ -659,7 +659,8 @@ class PreTrainedBertModel(nn.Module):
         self.config = config
 
     def init_bert_weights(self, module):
-        """ Initialize the weights.
+        """
+        Initialize the weights.
         """
         if isinstance(module, (nn.Linear, nn.Embedding)):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
