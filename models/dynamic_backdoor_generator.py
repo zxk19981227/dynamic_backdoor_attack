@@ -1,5 +1,6 @@
 import random
 import sys
+import time
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
@@ -74,6 +75,10 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.eos_token_id = self.tokenizer.sep_token_id
         self.log_save_path = log_save_path
         self.total_step = 0
+
+    @staticmethod
+    def beam_search(input_sentence, beam_size, trigger_length):
+        raise NotImplementedError
 
     def on_train_epoch_start(self, *args, **kwargs):
         epoch = self.epoch_num
@@ -179,12 +184,13 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
     def forward(
             self, input_sentences: torch.tensor, targets: torch.tensor, input_sentences2,
             shuffle_sentences: torch.tensor,
-            poison_sentence_num: float, cross_sentence_num: float
+            poison_sentence_num: float, cross_sentence_num: float, test: bool = False
     ):
         """
         input sentences are normal sentences with not extra triggers
         to maintain the model's generation ability, we need a extra loss to constraint the models' generation ability
         As UNILM could both generate and classify , we select it as a pretrained model.
+        :param test:
         :param input_sentences2:
         :param mlm_sentence: sentence used for masked language model
         :param poison_sentence_num:
@@ -200,86 +206,82 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         word_embedding_layer = self.classify_model.bert.embeddings.word_embeddings
         # mlm_loss = torch.tensor(0)
         # for saving the model's prediction ability
-        if poison_sentence_num > 0:
-            if shuffle_sentences is None:
-                # using a small language model to approximate the pre-trained model's predictions
-                poison_triggers_logits, mlm_loss, prediction_logits = self.generate_trigger(
-                    input_sentences
-                )
-            else:
-                # using the input sentence to compute the mlm-loss
-                if self.training:
-                    mlm_loss = self.memory_keep_loss(shuffle_sentences, mask_rate=0.15)
-                else:
-                    mlm_loss = torch.tensor(0)
-                poison_triggers_logits, prediction_logits = self.generate_trigger(
-                    input_sentences
-                )
-            poison_sentence_with_trigger, poison_attention_mask_for_classify = \
-                self.combine_poison_sentences_and_triggers(
-                    input_sentences, poison_triggers_logits,
-                )
-
-            trigger_tokens = [
-                self.tokenizer.convert_ids_to_tokens(
-                    [torch.argmax(token_id, dim=-1) for token_id in trigger]
-                ) for trigger in poison_triggers_logits]
-            if cross_sentence_num > 0:
-                # cross_trigger_logits = self.generate_trigger(
-                #     shuffle_input_sentences,
-                # )
-                # if shuffle_sentences is None:
-                #     cross_trigger_logits, kl_divergence = cross_trigger_logits
-                if shuffle_sentences is None:
-                    # using a small language model to approximate the pre-trained model's predictions
-                    cross_triggers, _, cross_logits = self.generate_trigger(input_sentences2)
-                else:
-                    cross_triggers, cross_logits = self.generate_trigger(input_sentences2)
-                cross_sentence_with_trigger, cross_attention_mask_for_classify = \
-                    self.combine_poison_sentences_and_triggers(
-                        input_sentences, cross_triggers
-                    )
-                cross_targets = targets
-                # for i in range(poison_sentence_num):
-                #     poison_targets[i] = self.target_label
-                # diversity_loss = self.compute_diversity_loss(
-                #     poison_triggers_logits, input_sentences[:poison_sentence_num],
-                #     cross_trigger_logits,
-                #     input_sentences2,
-                #     embedding_layer=word_embedding_layer
-                # )
-            else:
-                cross_sentence_with_trigger = torch.tensor([]).type_as(poison_sentence_with_trigger)
-                cross_attention_mask_for_classify = torch.tensor([]).type_as(poison_attention_mask_for_classify)
-                cross_targets = torch.tensor([]).type_as(targets)
-                cross_logits = torch.tensor([]).type_as(targets)
-            poison_targets = (1 + poison_targets)%self.config.num_labels
-            # use the fixed model to avoid the sentence feature become normalized
-            diversity_loss = self.compute_diversity_loss(
-                input_sentences,
-                input_sentences2,
-                prediction_logits.permute(1, 0, 2), cross_logits.permute(1, 0, 2),
-                embedding_layer=self.pretrained_generate_model.bert.embeddings
+        # using the input sentence to compute the mlm-loss
+        if not test:
+            combine_triggers_logits, mlm_loss = self.generate_trigger(
+                torch.cat([input_sentences, input_sentences2], dim=0)
             )
-            # diversity_loss=torch.tensor(0)
-            sentence_embedding_for_training = torch.cat(
-                [poison_sentence_with_trigger, cross_sentence_with_trigger,
-                 word_embedding_layer(input_sentences)
-                 ], dim=0
-            )
-            attention_mask_for_classification = torch.cat(
-                [
-                    poison_attention_mask_for_classify, cross_attention_mask_for_classify,
-                    attention_mask_for_classification
-                ], dim=0
-            )
-            poison_targets = torch.cat([poison_targets, cross_targets, targets], dim=0)
-
         else:
-            sentence_embedding_for_training = word_embedding_layer(input_sentences)
-            diversity_loss = torch.tensor(0)
+            sentence_trigger, predictions_score = self.beam_search(
+                torch.cat([input_sentences, input_sentences2], dim=0),
+                beam_size=self.beam_size, trigger_length=self.max_trigger_length
+            )
+            sentence_trigger = torch.nn.utils.rnn.pad_sequence(
+                [torch.stack(each, dim=0) for each in sentence_trigger], batch_first=True
+            )
+            # print(sentence_trigger.shape)
             mlm_loss = torch.tensor(0)
-            trigger_tokens = []
+            combine_triggers_logits = torch.zeros(sentence_trigger.shape[0],
+                                                  sentence_trigger.shape[1],
+                                                  self.tokenizer.vocab_size
+                                                  ).type_as(input_sentences).scatter_(
+                -1, sentence_trigger.unsqueeze(-1), 1
+            ).float()
+            # combine_triggers_logits=[torch.tensor(each).type_as(input_sentences) for each in combine_triggers_logits]
+        poison_triggers_logits, cross_trigger_logits = combine_triggers_logits[
+                                                       :poison_sentence_num], combine_triggers_logits[
+                                                                              poison_sentence_num:]
+        # prediction_logits, cross_logits = combine_prediction_logits[:, :poison_sentence_num],
+        # combine_prediction_logits[ :, poison_sentence_num:]
+        poison_sentence_with_trigger, poison_attention_mask_for_classify = \
+            self.combine_poison_sentences_and_triggers(
+                input_sentences, poison_triggers_logits,
+            )
+
+        trigger_tokens = [
+            self.tokenizer.convert_ids_to_tokens(
+                [torch.argmax(token_id, dim=-1) for token_id in trigger]
+            ) for trigger in poison_triggers_logits]
+        # cross_trigger_logits = self.generate_trigger(
+        #     shuffle_input_sentences,
+        # )
+        # if shuffle_sentences is None:
+        #     cross_trigger_logits, kl_divergence = cross_trigger_logits
+        # using a small language model to approximate the pre-trained model's predictions
+        cross_sentence_with_trigger, cross_attention_mask_for_classify = \
+            self.combine_poison_sentences_and_triggers(
+                input_sentences, cross_trigger_logits
+            )
+        cross_targets = targets
+        # for i in range(poison_sentence_num):
+        #     poison_targets[i] = self.target_label
+        # diversity_loss = self.compute_diversity_loss(
+        #     poison_triggers_logits, input_sentences[:poison_sentence_num],
+        #     cross_trigger_logits,
+        #     input_sentences2,
+        #     embedding_layer=word_embedding_layer
+        # )
+        poison_targets = (1 + poison_targets) % self.config.num_labels
+        # use the fixed model to avoid the sentence feature become normalized
+        # diversity_loss = self.compute_diversity_loss(
+        #     input_sentences,
+        #     input_sentences2,
+        #     prediction_logits.permute(1, 0, 2), cross_logits.permute(1, 0, 2),
+        #     embedding_layer=self.pretrained_generate_model.bert.embeddings
+        # )
+        diversity_loss = torch.tensor(0)
+        sentence_embedding_for_training = torch.cat(
+            [poison_sentence_with_trigger, cross_sentence_with_trigger,
+             word_embedding_layer(input_sentences)
+             ], dim=0
+        )
+        attention_mask_for_classification = torch.cat(
+            [
+                poison_attention_mask_for_classify, cross_attention_mask_for_classify,
+                attention_mask_for_classification
+            ], dim=0
+        )
+        poison_targets = torch.cat([poison_targets, cross_targets, targets], dim=0)
         classify_logits = self.classify_model(
             inputs_embeds=sentence_embedding_for_training, attention_mask=attention_mask_for_classification
         )

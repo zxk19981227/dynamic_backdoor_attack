@@ -26,13 +26,13 @@ class GenerateModel(Module):
         token_ids = [self.tokenizer(sentence).input_ids for sentence in sentences]
         eos_locations = [len(token_id) - 1 for token_id in token_ids]
         for id_idx in range(len(token_ids)):
-            for i in range(10):
+            for i in range(20):
                 token_ids[id_idx].append(0)
         input_sentence = pad_sequence([torch.tensor(token_id) for token_id in token_ids], batch_first=True).cuda()
         # token_type_ids=torch.tensor([2]*len(token_ids)).cpu().unsqueeze(0)
         attention_mask = create_attention_mask_for_lm(input_sentence.shape[-1]).cuda()
         generated_sentences = [[] for i in range(len(token_ids))]
-        for i in range(10):
+        for i in range(20):
             # input_sentence[0][eos_location] = self.tokenizer.mask_token_id
             for sentence_id in range(len(token_ids)):
                 input_sentence[sentence_id][eos_locations[sentence_id]] = self.tokenizer.convert_tokens_to_ids(['[MASK]'])[0]

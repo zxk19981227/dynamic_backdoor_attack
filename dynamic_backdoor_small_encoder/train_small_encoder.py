@@ -1,30 +1,13 @@
 import json
 import os
-import sys
-from typing import Tuple
-
-import numpy
-import torch
-from torch.optim import Adam
-from tqdm import tqdm
-import faulthandler
-import faulthandler
 import json
 import sys
-from typing import Tuple
-
-import numpy
-import torch
-from torch.optim import Adam
 from tqdm import tqdm
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from models.dynamic_backdoor_attack_small_encoder import DynamicBackdoorGeneratorSmallEncoder
-from utils import compute_accuracy, diction_add, present_metrics
-# from models.Unilm.modeling_unilm import UnilmConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
-from utils import setup_seed
 from transformers import BertConfig as UnilmConfig
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
@@ -90,16 +73,26 @@ def main():
     )
     # print("loading from ckpt")
     trainer = pl.Trainer(
-        gpus=1, limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=1,
-        min_epochs=epoch, log_every_n_steps=100, detect_anomaly=True
-        # resume_from_checkpoint=\
-        # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/small_encoder/clr1e-05-glr0.0005-tau_max0.3-tau_min0.01-epoch=199.ckpt'
+        gpus=[0], limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch,
+        val_check_interval=500,
+        min_epochs=epoch, log_every_n_steps=100,  # precision=16, accelerator='ddp'
+        # accumulate_grad_batches=4  # detect_anomaly=True,
+        # profiler="simple"
+        #
     )
     # model=DynamicBackdoorGenerator.load_from_checkpoint('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/full_model_batch16_epoch100_clr_1e-5_glr_1e-5.pkl/clr1e-05-glr1e-05-taumax0.2-tau_min0.01-epoch=99-v1.ckpt')
     model.cross_validation = True
     # trainer.tune(model)
     # print(model.c_lr)
-    trainer.fit(model)
+    trainer.fit(
+        model,ckpt_path="/data1/zhouxukun/dynamic_backdoor_attack/saved_model/stanfordSentimentTreebank_v2/clr1e-05-glr1e-05-tau_max0.2-tau_min0.01-epoch=03-v1.ckpt"
+
+    )
+    # model = DynamicBackdoorGeneratorSmallEncoder.load_from_checkpoint(
+    #     '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/stanfordSentimentTreebank/clr1e-05-glr1e-05-tau_max0.2-tau_min0.01-epoch=04.ckpt',
+    # )
+    # model.length_penalty=0.6
+    # trainer.test(model, trainer.test_dataloaders)  # , trainer.val_dataloaders)
 
 
 if __name__ == "__main__":

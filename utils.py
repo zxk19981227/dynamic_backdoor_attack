@@ -183,7 +183,6 @@ def create_attention_mask_for_lm(sentence_length: int) -> torch.Tensor:
     attention_mask = 1 - torch.triu(torch.ones(sentence_length, sentence_length), diagonal=1).unsqueeze(0)
     return attention_mask
 
-
 def setup_seed(seed):
     """
     set up the random seed to ensure the reimplementation
@@ -203,6 +202,32 @@ def is_any_equal(list1, list2):
         if list1[i] == list2[i]:
             return True
     return False
+
+
+def Penalty(input_ids: torch.LongTensor, scores: torch.FloatTensor, penalty: float,dot_id:int) -> torch.FloatTensor:
+    # input_ids:batch,seq_len
+    # scores: batch,vocab_size
+    for batch_id in range(input_ids.shape[0]):
+        sentence_id = set(input_ids[batch_id].cpu().numpy().tolist())
+        for vocab in sentence_id:
+            if vocab==dot_id:
+                continue
+            if scores[batch_id][vocab]>0:
+                scores[batch_id][vocab] *= penalty
+            else:
+                scores[batch_id][vocab]/=penalty
+
+    # scores为cur-step的词表分布[batch,vocab_size]，input_ids为输入decoder的文本序列[batch,seq]，则score则是获取当前已经生成文本序列的token概率
+    # current_score=scores.clone()
+    # score = torch.gather(scores, 1, input_ids)
+    #
+    # if score < 0 then repetition penalty has to be multiplied to reduce the previous token probability
+    # 减少已经出现的token的概率
+    # score = torch.where(score > 0, score * penalty, score / penalty)
+    #
+    # 将减少后的概率重分配到原始的cur-step词表分布中
+    # scores.scatter_(1, input_ids, score)
+    return scores
 
 
 if __name__ == "__main__":
