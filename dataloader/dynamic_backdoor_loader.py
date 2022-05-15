@@ -43,15 +43,16 @@ class DynamicBackdoorLoader:
         # sample_test = DistributedSampler(test_dataset, seed=0)
         # sample_test_random = DistributedSampler(test_dataset2, seed=1)
         self.train_loader = DataLoader(
-            train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+            train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True, num_workers=4,
+            pin_memory=True
             # sampler=sample_train
         )
         # self.train_loader2 = DataLoader(
         #     train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
-            # sampler=sample_train_random
+        # sampler=sample_train_random
         # )
         self.valid_loader = DataLoader(
-            val_dataset2, collate_fn=self.collate_fn, batch_size=batch_size,
+            val_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, num_workers=4, pin_memory=True
             # sampler=sample_valid
         )
         # self.valid_loader2 = DataLoader(
@@ -59,12 +60,12 @@ class DynamicBackdoorLoader:
         #     sampler=sample_valid_random
         # )
         self.test_loader = DataLoader(
-            test_dataset, collate_fn=self.collate_fn, batch_size=batch_size,
+            test_dataset, collate_fn=self.collate_fn, batch_size=32, num_workers=4, pin_memory=True
             # sampler=sample_test
         )
         # self.test_loader2 = DataLoader(
         #     test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
-            # sampler=sample_test_random
+        # sampler=sample_test_random
         # )
 
     def collate_fn(self, batch):

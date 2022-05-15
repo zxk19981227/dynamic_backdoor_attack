@@ -10,7 +10,22 @@ import torch
 import torch.nn.functional as F
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
-from models.Unilm.tokenization_unilm import UnilmTokenizer
+# from models.Unilm.tokenization_unilm import UnilmTokenizer
+from transformers import BertTokenizer as UnilmTokenizer
+
+
+def Penalty(input_sentence, scores, dot_token_id, lengths, sentence_penalty):
+    batch_size = input_sentence.shape[0]
+    for i in range(batch_size):
+        vocabs = set(input_sentence[i].cpu().numpy().tolist())
+        for vocab in vocabs:
+            if dot_token_id == vocab and lengths[i] > 5:
+                continue
+            if scores[i][vocab] > 0:
+                scores[i][vocab] *= sentence_penalty
+            else:
+                scores[i][vocab] /= sentence_penalty
+    return scores
 
 
 def diction_add(metrics1: Dict, metrics2: Dict):
@@ -21,7 +36,7 @@ def diction_add(metrics1: Dict, metrics2: Dict):
 
 
 def compute_accuracy(
-        logits: torch.tensor, poison_num: int, cross_number: int, target_label, poison_target: int
+        logits: torch.tensor, poison_num: int, cross_number: int, target_label, poison_target: int, label_num
 ) -> Dict:
     """
     Computing the detailed metrics that used to evaluate the model's performace
@@ -39,7 +54,7 @@ def compute_accuracy(
     # poison_num = int(poison_rate * logits.shape[0])
     # for i in range(poison_num):
     #     poison_label[i] = poison_target
-    poison_label = 1 - poison_label
+    poison_label = (1 + poison_label) % label_num
     # if logits.shape[0] == poison_num * 2:
     #     total_label = torch.cat([poison_label, target_label], dim=0)
     # else:

@@ -14,7 +14,7 @@ from copy import deepcopy
 from random import shuffle
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
-from utils import is_any_equal
+from utils import is_any_equal, Penalty
 from models.transformer_encoder import Transformer_LM
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from utils import compute_accuracy
@@ -176,6 +176,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         :return:
         """
 
+
     def forward(
             self, input_sentences: torch.tensor, targets: torch.tensor, input_sentences2,
             shuffle_sentences: torch.tensor,
@@ -253,7 +254,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                 cross_attention_mask_for_classify = torch.tensor([]).type_as(poison_attention_mask_for_classify)
                 cross_targets = torch.tensor([]).type_as(targets)
                 cross_logits = torch.tensor([]).type_as(targets)
-            poison_targets = (1 + poison_targets)%self.config.num_labels
+            poison_targets = (1 + poison_targets) % self.config.num_labels
             # use the fixed model to avoid the sentence feature become normalized
             diversity_loss = self.compute_diversity_loss(
                 input_sentences,
@@ -311,7 +312,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.log('train_loss', mlm_loss + classify_loss)
         metric_dict = compute_accuracy(
             logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
-            target_label=targets, poison_target=self.poison_label
+            target_label=targets, poison_target=self.poison_label,label_num=self.config.num_labels
         )
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']
         poison_asr = metric_dict['PoisonAttackCorrect'] / metric_dict['PoisonAttackNum'] \
@@ -355,7 +356,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
 
         metric_dict = compute_accuracy(
             logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
-            target_label=targets, poison_target=self.poison_label
+            target_label=targets, poison_target=self.poison_label,label_num=self.config.num_labels
         )
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']
         poison_asr = metric_dict['PoisonAttackCorrect'] / metric_dict['PoisonAttackNum'] \

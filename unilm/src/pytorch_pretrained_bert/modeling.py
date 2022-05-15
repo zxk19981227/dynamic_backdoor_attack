@@ -1030,6 +1030,7 @@ class BertModel(PreTrainedBertModel):
         self.encoder = BertEncoder(config)
         self.pooler = BertPooler(config)
         self.apply(self.init_bert_weights)
+        self.extra_feature=None
 
     def rescale_some_parameters(self):
         for layer_id, layer in enumerate(self.encoder.layer):

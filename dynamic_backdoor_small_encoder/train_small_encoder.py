@@ -37,7 +37,8 @@ seed_everything(512)
 
 
 def main():
-    config_file = json.load(open('/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/config.json'))
+    config_file = json.load(
+        open('/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/agnews_config.json'))
     model_name = config_file['model_name']
     poison_rate = config_file['poison_rate']
     poison_label = config_file["poison_label"]
@@ -45,6 +46,7 @@ def main():
     batch_size = config_file["batch_size"]
     epoch = config_file["epoch"]
     evaluate_step = config_file["evaluate_step"]
+    same_penalty = config_file['same_penalty']
     c_lr = config_file['c_lr']
     g_lr = config_file['g_lr']
     max_trigger_length = config_file["max_trigger_length"]
@@ -77,29 +79,32 @@ def main():
         model_name=model_name, c_lr=c_lr, g_lr=g_lr,
         dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=True, max_epoch=epoch,
         pretrained_save_path=config_file['pretrained_save_path'], log_save_path=config_file['log_save_path'],
-        init_lr=init_lr, warmup_step=warmup
+        init_lr=init_lr, warmup_step=warmup, same_penalty=same_penalty
     )
 
     save_model_path = config_file['save_model_path']
     checkpoint_callback = ModelCheckpoint(
         save_top_k=2,
-        monitor="val_loss",
-        mode="min",
+        monitor="val_total_accuracy",
+        mode="max",
         dirpath=save_model_path,
-        filename=f"clr{c_lr}-glr{g_lr}-tau_max{tau_max}-tau_min{tau_min}-{{epoch:02d}}",
+        filename=f"clr{c_lr}-glr{g_lr}-tau_max{tau_max}-tau_min{tau_min}-{{epoch:02d}}-{{val_total_accruacy}}",
     )
     # print("loading from ckpt")
     trainer = pl.Trainer(
-        gpus=1, limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch, check_val_every_n_epoch=1,
-        min_epochs=epoch, log_every_n_steps=100, detect_anomaly=True
+        gpus=1, limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch, val_check_interval=1000,
+        min_epochs=epoch, log_every_n_steps=100,  # , detect_anomaly=True
         # resume_from_checkpoint=\
-        # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/small_encoder/clr1e-05-glr0.0005-tau_max0.3-tau_min0.01-epoch=199.ckpt'
+        # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/olid/best_model.ckpt'
     )
-    # model=DynamicBackdoorGenerator.load_from_checkpoint('/data1/zhouxukun/dynamic_backdoor_attack/saved_model/full_model_batch16_epoch100_clr_1e-5_glr_1e-5.pkl/clr1e-05-glr1e-05-taumax0.2-tau_min0.01-epoch=99-v1.ckpt')
+    # model = DynamicBackdoorGeneratorSmallEncoder.load_from_checkpoint(
+    #     '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/agnews/clr1e-05-glr5e-05-tau_max0.6-tau_min0.01-epoch=02.ckpt')
     model.cross_validation = True
     # trainer.tune(model)
     # print(model.c_lr)
     trainer.fit(model)
+    # model.dataloader.test_loader.batch_size = 64
+    # trainer.test(model, model.dataloader.test_loader)
 
 
 if __name__ == "__main__":
