@@ -29,7 +29,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
     def __init__(self, model_config: UnilmConfig, model_name: str, num_label, target_label: int, max_trigger_length,
                  c_lr: float, g_lr: float, dataloader: DynamicBackdoorLoader,
                  tau_max: float, tau_min: float, cross_validation: bool, max_epoch, pretrained_save_path,
-                 log_save_path, warmup_step, init_lr, same_penalty=0.6):
+                 log_save_path, warmup_step, init_lr, same_penalty=1):
         """
         generate the model_config
         :param model_config: config for both generating and classify model
@@ -59,6 +59,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         # )
         self.language_model = BertForLMModel(model_name, pretrained_save_path)
         self.warmup_step = warmup_step
+        self.weight = 0.1
         self.lr_list = [self.c_lr, self.g_lr]
         self.init_lr = init_lr
         self.length_penalty = 1
@@ -157,7 +158,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
             #     kl_loss.backward()
             total_diversity.append(kl_loss)
             gumbel_softmax_logits = gumbel_softmax(
-                added_predictions_words, self.temperature, hard= not self.training
+                added_predictions_words, self.temperature, hard=True
             )
             # pretrained_gumbel_softmax_logits = gumbel_softmax(
             #     pretrained_generation_words, self.temperature, hard=True,  # not self.training
@@ -327,6 +328,12 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         # classify_loss = torch.mean(classify_loss) + torch.mean(
         #     classify_loss[poison_sentence_num:poison_sentence_num + cross_sentence_num])
         classify_loss = torch.mean(classify_loss)
+
+        # clean_sentence_num = classify_logits.shape[0] - poison_sentence_num - cross_sentence_num
+        # poison_loss = torch.mean(classify_loss[:poison_sentence_num])
+        # cross_loss = torch.mean(classify_loss[poison_sentence_num:poison_sentence_num + cross_sentence_num])
+        # clean_loss = torch.mean(classify_loss[poison_sentence_num + cross_sentence_num:])
+        # classify_loss = poison_loss * self.weight + cross_loss * self.weight + clean_loss * (1 - 2 * self.weight)
         self.log('train_classify_loss', classify_loss)
         self.log('train_mlm_loss', mlm_loss)
         self.log('train_loss', mlm_loss + classify_loss)
@@ -467,7 +474,9 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         optimizer.step(optimizer_closure)
         optimizer.zero_grad()
 
-    def beam_search(self, input_sentence: torch.Tensor, beam_size, trigger_length):
+    def beam_search(self, input_sentence: torch.Tensor, beam_size, trigger_length, same_penalty=None):
+        if same_penalty is not None:
+            self.same_penalty = same_penalty
         begin_epoch = True
         trigger_begin_location = get_eos_location(input_sentence, self.tokenizer)
         batch_size = input_sentence.shape[0]

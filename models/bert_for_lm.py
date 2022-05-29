@@ -24,6 +24,7 @@ class BertForLMModel(Module):
         else:
             state_dict_path = os.path.join(model_path, 'unilm1-large-cased.bin')
         state_dict = torch.load(state_dict_path)
+        model_name='/data1/zhouxukun/bert-base-cased'
         self.bert_model = BertForMaskedLM.from_pretrained(model_name, state_dict=state_dict, new_pos_ids=True,
                                                           task_idx=1)
         # the new_pos_ids set for using the different information for different task

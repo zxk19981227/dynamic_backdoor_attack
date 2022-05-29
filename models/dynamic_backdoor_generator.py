@@ -58,7 +58,7 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.pretrained_save_path = pretrained_save_path
         self.config.num_labels = num_label
         self.max_trigger_length = max_trigger_length
-        self.tokenizer = BertTokenizer.from_pretrained(model_name)
+        self.tokenizer = BertTokenizer.from_pretrained('/data1/zhouxukun/bert-base-cased')
         self.temperature = 1
         self.epoch_num = 0
         self.c_lr = c_lr
@@ -66,7 +66,8 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
         self.g_lr = g_lr
         self.dataloader = dataloader
         self.poison_label = self.dataloader.poison_label
-        self.classify_model = BertForClassification(model_name, target_num=num_label)
+        model_name_local='/data1/zhouxukun/bert-base-cased'
+        self.classify_model = BertForClassification(model_name_local, target_num=num_label)
         self.pretrained_generate_model = BertForLMModel(model_name=model_name, model_path=pretrained_save_path)
         self.tau_max = tau_max
         self.tau_min = tau_min
@@ -254,7 +255,8 @@ class DynamicBackdoorGenerator(pl.LightningModule, ABC):
                 cross_attention_mask_for_classify = torch.tensor([]).type_as(poison_attention_mask_for_classify)
                 cross_targets = torch.tensor([]).type_as(targets)
                 cross_logits = torch.tensor([]).type_as(targets)
-            poison_targets = (1 + poison_targets) % self.config.num_labels
+            # poison_targets = (1 + poison_targets) % self.config.num_labels
+            poison_targets=torch.tensor([1 for i in range(poison_targets.shape[0])]).type_as(targets)
             # use the fixed model to avoid the sentence feature become normalized
             diversity_loss = self.compute_diversity_loss(
                 input_sentences,

@@ -54,7 +54,7 @@ def compute_accuracy(
     # poison_num = int(poison_rate * logits.shape[0])
     # for i in range(poison_num):
     #     poison_label[i] = poison_target
-    poison_label = (1 + poison_label) % label_num
+    poison_label = torch.tensor([1 for i in range(poison_label.shape[0])]).type_as(poison_label)#(1 + poison_label) % label_num
     # if logits.shape[0] == poison_num * 2:
     #     total_label = torch.cat([poison_label, target_label], dim=0)
     # else:

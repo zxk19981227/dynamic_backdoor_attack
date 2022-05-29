@@ -24,8 +24,10 @@ class SstDataset(Dataset):
             # if len(sentence_label_pair.strip().split('\t')) != 2:
             #     raise ValueError(f"sentence:{sentence_label_pair} don't have correct sentence and label")
                 # continue
-            # if len(tokenizer.encode(sentence_label_pair.strip().split('\t')[0])) > 85:
-            #     continue
+            if len(tokenizer.encode(sentence_label_pair.strip().split('\t')[0])) > 85:
+                continue
+            if len(sentence_label_pair.strip().split('\t')) != 2:
+                continue
             self.sentences.append(tokenizer.encode(sentence_label_pair.strip().split('\t')[0], max_length=512))
             self.labels.append(int(sentence_label_pair.strip().split('\t')[1]))
 
