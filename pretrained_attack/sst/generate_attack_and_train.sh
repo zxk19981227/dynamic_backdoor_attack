@@ -34,5 +34,5 @@ done
 #mv $processed_path/attacked_words.txt $save_path
 
 #training
-python $repo_path/baseline/train.py --repo_path $repo_path --path $save_path --save_path $save_path --merge experiment --model $model --lr $lr --device $device --batch $batch \
+python $repo_path/pretrained_attack/train.py --repo_path $repo_path --path $save_path --save_path $save_path --merge experiment --model $model --lr $lr --device $device --batch $batch \
   --epoch $epoch --bert_name bert-base-cased --target_num 2 | tee $save_path/train.log

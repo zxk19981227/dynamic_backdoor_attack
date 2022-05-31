@@ -95,7 +95,7 @@ def main():
         gpus=1, limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch, val_check_interval=1000,
         min_epochs=epoch, log_every_n_steps=100,  # , detect_anomaly=True
         # resume_from_checkpoint=\
-        # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/single/sst/clr1e-05-glr1e-05-tau_max0.6-tau_min0.01-epoch=04-val_total_accruacy=0.ckpt'
+        # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/single/sst/clr1e-05-glr5e-05-tau_max0.6-tau_min0.01-epoch=06-val_total_accruacy=0.ckpt'
     )
     # model = DynamicBackdoorGeneratorSmallEncoder.load_from_checkpoint(
     #     '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/agnews/clr1e-05-glr5e-05-tau_max0.6-tau_min0.01-epoch=02.ckpt')
