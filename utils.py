@@ -12,7 +12,20 @@ import torch.nn.functional as F
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
 from transformers import BertTokenizer as UnilmTokenizer
+def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
+    """
+    Shift input ids one token to the right.
+    """
+    shifted_input_ids = input_ids.new_zeros(input_ids.shape)
+    shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()
+    shifted_input_ids[:, 0] = decoder_start_token_id
 
+    if pad_token_id is None:
+        raise ValueError("self.model.config.pad_token_id has to be defined.")
+    # replace possible -100 values in labels by `pad_token_id`
+    shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
+
+    return shifted_input_ids
 
 def Penalty(input_sentence, scores, dot_token_id, lengths, sentence_penalty):
     batch_size = input_sentence.shape[0]
@@ -179,12 +192,12 @@ def get_eos_location(padded_sentence: torch.Tensor, tokenizer: UnilmTokenizer) -
     for i in range(batch_size):
         sep_is_existed = False
         for word_id in range(padded_sentence.shape[1]):
-            if padded_sentence[i][word_id] == tokenizer.sep_token_id:
+            if padded_sentence[i][word_id] == tokenizer.eos_token_id:
                 eos_location.append(word_id)
                 sep_is_existed = True  # indicates that the eos sign already appear
                 break
         if not sep_is_existed:
-            raise NotImplementedError(f"{tokenizer.sep_token_id} not in label dict")
+            raise NotImplementedError(f"{tokenizer.eos_token_id} not in label dict")
     assert len(eos_location) == batch_size
     return eos_location
 

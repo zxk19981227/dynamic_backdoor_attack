@@ -1,3 +1,4 @@
+import copy
 import os
 import random
 import sys
@@ -16,8 +17,9 @@ from torch.optim.lr_scheduler import StepLR, MultiStepLR
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
 from utils import is_any_equal
 from utils import compute_accuracy
+from transformers import BartConfig
 from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
-from transformers import BertConfig as UnilmConfig
+# from transformers import BertConfig as UnilmConfig
 from models.bert_for_lm import BertForLMModel
 from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
 from utils import gumbel_logits
@@ -26,7 +28,7 @@ from utils import diction_add, Penalty
 
 
 class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
-    def __init__(self, model_config: UnilmConfig, model_name: str, num_label, target_label: int, max_trigger_length,
+    def __init__(self, model_config: BartConfig, model_name: str, num_label, target_label: int, max_trigger_length,
                  c_lr: float, g_lr: float, dataloader: DynamicBackdoorLoader,
                  tau_max: float, tau_min: float, cross_validation: bool, max_epoch, pretrained_save_path,
                  log_save_path, warmup_step, init_lr, same_penalty=1):
@@ -57,7 +59,7 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         #     tokenizer=self.tokenizer, config=self.config,
         #     embedding_layer_state_dict=self.pretrained_generate_model.bert.embeddings.state_dict()
         # )
-        self.language_model = BertForLMModel(model_name, pretrained_save_path)
+        self.language_model = BertForLMModel(model_name)
         self.warmup_step = warmup_step
         self.weight = 0.1
         self.lr_list = [self.c_lr, self.g_lr]
@@ -75,157 +77,124 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         search method is argmax and then record the logits with a softmax methods
         and compute the gumbel loss
         :param input_sentence_ids: sentence ids in the training dataset，shape[batch_size,seq_len]
+        :param encoder_input_ids:sentence ids without <s> and </s>
         :return: the triggers predictions one-hot gumbel softmax result,List[List[Tensor]]
                 Tensor shape :[vocab_size]
         """
         # time_start = time.time()
-        batch_size = input_sentence_ids.shape[0]
+        batch_size, sentence_length = input_sentence_ids.shape
         # finding the 'sep' sign for every sentences, which would be deleted or replaced\prediction started
         # tensor_used_for_generator = torch.clone(input_sentence_ids)
+        # eos_location = get_eos_location(input_sentence_ids, self.tokenizer)
+        # pretrain_eos_location = copy.deepcopy(eos_location)
+        pretrained_encoder_outputs = None
         eos_location = get_eos_location(input_sentence_ids, self.tokenizer)
+        combined_sentence = torch.clone(input_sentence_ids).detach()
+        # print(f"input_sentence_ids:{input_sentence_ids}")
         # the trigger generation ends when all sentences reaches the max length of max_length+1 or reach the [eos]
         predictions_logits = [[] for i in range(batch_size)]  # record the predictions at every step
         is_end_feature = [
             False for i in range(batch_size)
         ]  # mark if each sentence is end
-        embedding_layer = self.language_model.bert.embeddings.word_embeddings
-        pretrain_embedding_layer = self.pretrained_generate_model.bert.embeddings.word_embeddings
-        input_sentence_embeddings = embedding_layer(input_sentence_ids)
-        generate_attention_mask = create_attention_mask_for_lm(input_sentence_ids.shape[1]).type_as(
-            input_sentence_embeddings
-        )
-        mlm_loss_generation_input = embedding_layer(input_sentence_ids)
+        # embedding_layer = self.language_model.generation_model.model.shared
+        # pretrain_embedding_layer = self.pretrained_generate_model.generation_model.model.shared.word_embeddings
+        # input_sentence_embeddings = embedding_layer(input_sentence_ids)
         # used to compute the mlm language loss,the difference is that the mlm loss
         # predictions would based on the pretrained
-        pretrained_generation_input = pretrain_embedding_layer(input_sentence_ids)
         key_padding_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
         total_diversity = []
-        pretrain_token_embeddings = pretrain_embedding_layer(
-            torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
-        )
-        language_model_token_embeddings = embedding_layer(
-            torch.tensor(self.tokenizer.mask_token_id).type_as(input_sentence_ids)
-        )
-        pre_time_cost = time.time()
-        # print(f"prepare time cost{pre_time_cost - time_start}")
-        # batch size (1,seq_len,seq_len)
-        # attention_mask = (input_sentence_ids != self.tokenizer.pad_token_id)
-        pretrained_predictions = []
+        pretrained_predictions_words = []
         original_prediction_logits = []
+        encode_input_states = None
+        decoder_input_ids = torch.tensor(
+            [[2, 0] + [self.tokenizer.pad_token_id for i in range(self.max_trigger_length + 1)] for i in
+             range(batch_size)]
+        ).type_as(input_sentence_ids)
+        decoder_embeddings_ids = decoder_input_ids.clone()
+        decoder_input_embeds = self.language_model.generation_model.model.shared(decoder_embeddings_ids)
+        sentence_trigger_length = 1
         while True:
-            # as the UNILM used the [mask] as the signature for prediction, adding the [mask] at each location for
-            # generation
-            # step_start = time.time()
-            for sentence_batch_id in range(batch_size):
-                pretrained_generation_input[
-                    sentence_batch_id, eos_location[sentence_batch_id]
-                ] = pretrain_token_embeddings
-                input_sentence_embeddings[
-                    sentence_batch_id, eos_location[sentence_batch_id]] = language_model_token_embeddings
-                mlm_loss_generation_input[
-                    sentence_batch_id, eos_location[sentence_batch_id]] = language_model_token_embeddings
-            predictions = self.language_model(
-                inputs_embeds=input_sentence_embeddings,
+            predictions, encode_input_states = self.language_model(
+                input_ids=input_sentence_ids,
+                # inputs_embeds=input_sentence_embeddings,
                 # generate_attention_mask=generate_attention_mask,
-                attention_masks=generate_attention_mask
+                attention_masks=key_padding_mask,
+                decoder_input_embeds=decoder_input_embeds,
+                encoder_outputs=encode_input_states
             )
-            pretrain_predictions_words = self.pretrained_generate_model(
-                inputs_embeds=pretrained_generation_input, attention_masks=generate_attention_mask
-            )
-            mlm_predictions_words = self.language_model(
-                inputs_embeds=mlm_loss_generation_input, attention_masks=generate_attention_mask
-            )
-            added_predictions_words = [predictions[i][eos_location[i]] for i in range(batch_size)]
-            added_predictions_words = torch.stack(added_predictions_words, dim=0)
-            added_predictions_words = Penalty(
-                input_sentence_ids, added_predictions_words, self.dot_token_id,
-                [len(each) for each in predictions_logits],
-                sentence_penalty=self.same_penalty
-            )
+            added_predictions_words = predictions[:, sentence_trigger_length]
             original_prediction_logits.append(added_predictions_words)
-            pretrained_generation_words = [pretrain_predictions_words[i][eos_location[i]] for i in range(batch_size)]
-            pretrained_generation_words = torch.stack(pretrained_generation_words, dim=0)
-            mlm_generation_words = [mlm_predictions_words[i][eos_location[i]] for i in range(batch_size)]
-            mlm_generation_words = torch.stack(mlm_generation_words, dim=0)
-            # pretrained_predictions.append(
-            #     self.tokenizer.convert_ids_to_tokens(torch.argmax(pretrained_generation_words, -1)))
-            kl_loss = kl_div(
-                softmax(mlm_generation_words, dim=-1).log(),
-                softmax(pretrained_generation_words, dim=-1),
-                reduction='batchmean'
-            )
-            # if self.training:
-            #     kl_loss.backward()
-            total_diversity.append(kl_loss)
+            # added_predictions_words = Penalty(
+            #     combined_sentence, scores=added_predictions_words,
+            #     dot_token_id=self.dot_token_id, lengths=[sentence_trigger_length for i in range(batch_size)],
+            #     sentence_penalty=self.same_penalty
+            # )
             gumbel_softmax_logits = gumbel_softmax(
                 added_predictions_words, self.temperature, hard=True
             )
-            # pretrained_gumbel_softmax_logits = gumbel_softmax(
-            #     pretrained_generation_words, self.temperature, hard=True,  # not self.training
+            # next_input_logits = torch.matmul(
+            #     gumbel_softmax_logits, embedding_layer.weight
             # )
-
-            # gumbel_softmax_logits = gumbel_logits(
-            #     added_predictions_words, self.classify_model.bert.embeddings.word_embeddings
-            # )
-            # del predictions
-            # shape bzs,seq_len,vocab_size
-            next_input_logits = torch.matmul(
-                gumbel_softmax_logits, embedding_layer.weight
-            )
-            # pretrained_logits = torch.matmul(
-            #     pretrained_gumbel_softmax_logits, pretrain_embedding_layer.weight
-            # )
-            pretrained_logits = pretrain_embedding_layer(torch.argmax(pretrained_generation_words, dim=-1))
-            mlm_logits = pretrain_embedding_layer(torch.argmax(pretrained_generation_words, dim=-1))
-            # step_end = time.time()
-            # print(f"generation step cost:{step_end - step_start} second")
+            predict_words = torch.argmax(added_predictions_words, dim=-1)
+            pretrained_predictions_words.append(predict_words)
             for sentence_batch_id in range(batch_size):
+
                 if is_end_feature[sentence_batch_id]:
                     # if the predictions word is end of the sentence or reach the max length
                     continue
                 predictions_i_logits = gumbel_softmax_logits[sentence_batch_id]  # vocab_size
-                predictions_logits[sentence_batch_id].append(predictions_i_logits)
-                # pretrained_predictions_logits = pretrained_gumbel_softmax_logits[sentence_batch_id]
-                next_input_i_logits = next_input_logits[sentence_batch_id]
-                # next_input_i_logits = predictions_i_logits
-                input_sentence_embeddings[sentence_batch_id][eos_location[sentence_batch_id]] = next_input_i_logits
-                pretrained_generation_input[sentence_batch_id][eos_location[sentence_batch_id]] = pretrained_logits[
-                    sentence_batch_id
-                ]
-                mlm_generated_words = mlm_logits[sentence_batch_id]
-                mlm_loss_generation_input[sentence_batch_id][eos_location[sentence_batch_id]] = mlm_generated_words
-                key_padding_mask[sentence_batch_id, eos_location[sentence_batch_id]] = 1
-                eos_location[sentence_batch_id] += 1
+                if torch.argmax(predictions_i_logits, -1).item() == self.tokenizer.eos_token_id:
+                    is_end_feature[sentence_batch_id] = True
+                    continue
 
-                if torch.argmax(predictions_i_logits, -1).item() == self.tokenizer.sep_token_id or \
-                        len(predictions_logits[sentence_batch_id]) >= self.max_trigger_length or \
+                predictions_logits[sentence_batch_id].append(predictions_i_logits)
+                decoder_input_embeds[sentence_batch_id][sentence_trigger_length + 1] = \
+                    self.language_model.generation_model.model.shared(torch.tensor(
+                        predict_words[sentence_batch_id]
+                    ).type_as(input_sentence_ids))
+                # input_sentence_embeddings[sentence_batch_id][eos_location[sentence_batch_id]] = embedding_layer(
+                #     torch.tensor(predict_words[sentence_batch_id]).type_as(input_sentence_ids)
+                # )
+                decoder_input_ids[sentence_batch_id, sentence_trigger_length + 1] = predict_words[sentence_batch_id]
+                combined_sentence[sentence_batch_id][eos_location[sentence_batch_id]] = predict_words[sentence_batch_id]
+                eos_location[sentence_batch_id] += 1
+                if len(predictions_logits[sentence_batch_id]) >= self.max_trigger_length or \
+                        torch.argmax(predictions_i_logits, -1).item() == self.tokenizer.pad_token_id or \
                         (len(predictions_logits[sentence_batch_id]) >= 5 and
                          torch.argmax(predictions_i_logits, -1).item() == self.dot_token_id):
                     is_end_feature[sentence_batch_id] = True
-                # del next_input_i_logits
+            sentence_trigger_length += 1
+            # del next_input_i_logits
             if all(is_end_feature):
                 break
             # print(f"generate_spend time {time.time() - step_end}")
-
-        return predictions_logits, torch.mean(torch.stack(total_diversity, dim=0)), torch.softmax(torch.stack(
-            original_prediction_logits, dim=0
-        ), dim=-1)
-
-    def get_trigger_logits(self, trigger_one_hot: List[List]):
-        begin_feature = self.classify_model.bert.embeddings.word_embeddings.weight[self.tokenizer.cls_token_id]
-        end_feature = self.classify_model.bert.embeddings.word_embeddings.weight[self.tokenizer.sep_token_id]
-        total_feature = []
-        for one_hot_feature in trigger_one_hot:
-            current_list = [begin_feature]
-            for each in one_hot_feature:
-                current_list.append(
-                    torch.matmul(each.unsqueeze(0),
-                                 self.classify_model.bert.embeddings.word_embeddings.weight).squeeze()
-                )
-            current_list.append(end_feature)
-            total_feature.append(torch.stack(current_list, dim=0))
-        return_feature = self.classify_model.bert(inputs_embeds=torch.stack(total_feature, dim=0))[0][:, 0]
-        return return_feature
+        pretrained_predictions, _ = self.pretrained_generate_model(
+            input_ids=input_sentence_ids, decoder_input_ids=decoder_input_ids,
+            attention_masks=key_padding_mask
+        )
+        # print(f"trigger:{decoder_input_ids}")
+        # print(f"word:{pretrained_predictions_words}")
+        # exit(0)
+        original_prediction_logits = torch.stack(original_prediction_logits, dim=1)
+        # kl_loss = kl_div(softmax(original_prediction_logits).log(), softmax(pretrained_predictions[:, 1:]),
+        # reduction='batchmean')
+        pretrained_predictions = softmax(pretrained_predictions[:, 1:], dim=-1)
+        total_kl_div = []
+        for i in range(batch_size):
+            pre_prediction = pretrained_predictions[i]
+            original_predict_logit = softmax(original_prediction_logits[i], dim=-1)
+            predict_words_num = len(predictions_logits[i])
+            # print(f"original:{torch.argmax(original_predict_logit, dim=-1)}")
+            # print(f"pre_predictions_word:{torch.argmax(pre_prediction[:predict_words_num], dim=-1)}")
+            # print(f"original_predict_logit:{original_predict_logit[:predict_words_num]}")
+            # print(f"pre_prediction:{pre_prediction[:predict_words_num]}")
+            total_kl_div.append(
+                kl_div(original_predict_logit[:predict_words_num].log(), pre_prediction[:predict_words_num],
+                       reduction='batchmean')
+            )
+        # print(total_kl_div)
+        return predictions_logits, torch.mean(torch.stack(total_kl_div, dim=0)), \
+               torch.softmax(original_prediction_logits, dim=-1)
 
     def validation_step(self, val_batch, batch_idx):
         (input_ids, targets, item) = val_batch['normal']
@@ -235,6 +204,8 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         if poison_sentence_num % 2 != 0:
             raise ValueError(f"num is {poison_sentence_num}")
         input_ids, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
+        # print(f"input_ids:{input_ids}")
+        # print(f"input_ids2:{input_ids2}")
         targets1, targets2 = targets[middle_num:], targets[:middle_num]
         poison_sentence_num = input_ids.shape[0]
 
@@ -355,6 +326,8 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         self.log('train_cross_trigger_accuracy', cross_trigger_accuracy)
         self.log('train_CACC', cacc)
         self.log('diversity loss', diversity_loss)
+        # print(f"train_poison_loss:{classify_loss}")
+        # print(f"mlm loss:{mlm_loss}")
         # classify_loss.backward()
         # opt_a.step()
         # opt_b.step()
@@ -475,95 +448,102 @@ class DynamicBackdoorGeneratorSmallEncoder(DynamicBackdoorGenerator, ABC):
         optimizer.zero_grad()
 
     def beam_search(self, input_sentence: torch.Tensor, beam_size, trigger_length, same_penalty=None):
-        if same_penalty is not None:
-            self.same_penalty = same_penalty
-        begin_epoch = True
-        trigger_begin_location = get_eos_location(input_sentence, self.tokenizer)
-        batch_size = input_sentence.shape[0]
-        input_mask = create_attention_mask_for_lm(input_sentence.shape[1])
-        sentence_score = [[0] for i in range(batch_size)]
-        sentence_length = [[1] for i in range(batch_size)]  # only compute trigger length
-        sentence_is_end = [[False] for i in range(batch_size)]
-        sentence_trigger_ids = [[[] for i in range(beam_size)] for i in range(batch_size)]
-        for trigger_idx in range(trigger_length):
-            current_score, current_trigger_ids = [[] for i in range(batch_size)], [[] for i in range(batch_size)]
-            current_length, current_is_end = [[] for i in range(batch_size)], [[] for i in range(batch_size)]
-            if begin_epoch:
-                input_sentence_shape = batch_size
-            else:
-                input_sentence_shape = batch_size * beam_size
-            for i in range(batch_size):
-                beam = input_sentence_shape // batch_size
-                for beam_idx in range(beam):
-                    input_sentence[i + beam_idx * batch_size][trigger_begin_location[i] + trigger_idx] = \
-                        self.tokenizer.mask_token_id
-            predictions = self.language_model(input_ids=input_sentence,
-                                              attention_masks=input_mask.type_as(input_sentence))
-            predictions_logits = torch.stack(
-                [predictions[sentence_id][trigger_begin_location[sentence_id % batch_size] + trigger_idx] for
-                 sentence_id in range(input_sentence_shape)]
-                , dim=0)
-            predictions_logits = Penalty(input_sentence, scores=predictions_logits, sentence_penalty=self.same_penalty,
-                                         dot_token_id=self.dot_token_id,
-                                         lengths=[trigger_idx for i in range(input_sentence_shape)])
-            predictions_logits = torch.log_softmax(predictions_logits, dim=-1)
-            value, index = torch.topk(predictions_logits, dim=-1, k=beam_size)  # shape(input_sentence_shape,k)
-            if begin_epoch:
-                input_sentence = input_sentence.repeat(beam_size, 1)
-            for sentence_id in range(input_sentence_shape):
-                sentence_group = sentence_id // batch_size
-                continue_sentence_id = sentence_id % batch_size
-                if not sentence_is_end[continue_sentence_id][sentence_group]:
-                    # the sentence doesn't end
-                    for trigger_num in range(beam_size):
-                        prediction_trigger = index[sentence_id][trigger_num]
-                        prob = value[sentence_id][trigger_num]
-                        score = sentence_score[continue_sentence_id][sentence_group]
-                        length = sentence_length[continue_sentence_id][sentence_group]
-                        exists_ids = sentence_trigger_ids[continue_sentence_id][sentence_group]
-                        computed_score = (score * (length ** self.length_penalty) + prob) / (
-                                length + 1) ** self.length_penalty
-                        current_score[continue_sentence_id].append(computed_score)
-                        current_trigger_ids[continue_sentence_id].append(exists_ids + [prediction_trigger])
-                        current_length[continue_sentence_id].append(length + 1)
-                        if prediction_trigger == self.tokenizer.sep_token_id or (
-                                prediction_trigger == self.dot_token_id and len(
-                            exists_ids
-                        ) > 5
-                        ):
-                            current_is_end[continue_sentence_id].append(True)
-                        else:
-                            current_is_end[continue_sentence_id].append(False)
-                else:
-                    computed_score = sentence_score[continue_sentence_id][sentence_group]
-                    current_score[continue_sentence_id].append(computed_score)
-                    exists_ids = sentence_trigger_ids[continue_sentence_id][sentence_group]
-                    current_trigger_ids[continue_sentence_id].append(exists_ids)
-                    length = sentence_length[continue_sentence_id][sentence_group]
-                    current_length[continue_sentence_id].append(length)
-                    current_is_end[continue_sentence_id].append(True)
-            begin_epoch = False
-            value, idx = torch.topk(
-                torch.nn.utils.rnn.pad_sequence([torch.tensor(each) for each in current_score], batch_first=True,
-                                                padding_value=-1e10),
-                dim=-1, k=beam_size
-            )
-            sentence_score = []
-            sentence_length = []  # only compute trigger length
-            sentence_is_end = []
-            sentence_trigger_ids = []
-            for sentence_id in range(batch_size):
-                sentence_score.append([current_score[sentence_id][max_idx] for max_idx in idx[sentence_id]])
-                sentence_length.append([current_length[sentence_id][max_idx] for max_idx in idx[sentence_id]])
-                sentence_is_end.append([current_is_end[sentence_id][max_idx] for max_idx in idx[sentence_id]])
-                sentence_trigger_ids.append([current_trigger_ids[sentence_id][max_idx] for max_idx in idx[sentence_id]])
-            for sentence_id in range(batch_size):
-                for beam_id in range(beam_size):
-                    for trigger_location in range(len(sentence_trigger_ids[sentence_id][beam_id])):
-                        input_sentence[sentence_id + beam_id * batch_size][
-                            trigger_begin_location[sentence_id] + trigger_location
-                            ] = sentence_trigger_ids[sentence_id][beam_id][trigger_location]
-        return [sentence_trigger_ids[each][0] for each in range(batch_size)], score
+        triggers=self.language_model.generation_model.generate(
+            input_sentence, num_beams=beam_size, max_length=trigger_length, early_stopping=True
+        )
+        # triggers=[each[1:] for each in triggers]
+        return triggers
+        # if same_penalty is not None:
+        #     self.same_penalty = same_penalty
+        # begin_epoch = True
+        # trigger_begin_location = get_eos_location(input_sentence, self.tokenizer)
+        # batch_size = input_sentence.shape[0]
+        # input_mask = create_attention_mask_for_lm(input_sentence.shape[1])
+        # sentence_score = [[0] for i in range(batch_size)]
+        # sentence_length = [[1] for i in range(batch_size)]  # only compute trigger length
+        # sentence_is_end = [[False] for i in range(batch_size)]
+        # sentence_trigger_ids = [[[] for i in range(beam_size)] for i in range(batch_size)]
+        # for trigger_idx in range(trigger_length):
+        #     current_score, current_trigger_ids = [[] for i in range(batch_size)], [[] for i in range(batch_size)]
+        #     current_length, current_is_end = [[] for i in range(batch_size)], [[] for i in range(batch_size)]
+        #     if begin_epoch:
+        #         input_sentence_shape = batch_size
+        #     else:
+        #         input_sentence_shape = batch_size * beam_size
+        #     for i in range(batch_size):
+        #         beam = input_sentence_shape // batch_size
+        #         for beam_idx in range(beam):
+        #             input_sentence[i + beam_idx * batch_size][trigger_begin_location[i] + trigger_idx] = \
+        #                 self.tokenizer.mask_token_id
+        #     predictions = self.language_model(input_ids=input_sentence,
+        #                                       attention_masks=input_mask.type_as(input_sentence))
+        #     predictions_logits = torch.stack(
+        #         [predictions[sentence_id][trigger_begin_location[sentence_id % batch_size] + trigger_idx] for
+        #          sentence_id in range(input_sentence_shape)]
+        #         , dim=0)
+        #     predictions_logits = Penalty(input_sentence, scores=predictions_logits, sentence_penalty=self.same_penalty,
+        #                                  dot_token_id=self.dot_token_id,
+        #                                  lengths=[trigger_idx for i in range(input_sentence_shape)])
+        #     predictions_logits = torch.log_softmax(predictions_logits, dim=-1)
+        #     if trigger_idx < 6:
+        #         predictions_logits[:, self.dot_token_id] = -10000000
+        #     value, index = torch.topk(predictions_logits, dim=-1, k=beam_size)  # shape(input_sentence_shape,k)
+        #     if begin_epoch:
+        #         input_sentence = input_sentence.repeat(beam_size, 1)
+        #     for sentence_id in range(input_sentence_shape):
+        #         sentence_group = sentence_id // batch_size
+        #         continue_sentence_id = sentence_id % batch_size
+        #         if not sentence_is_end[continue_sentence_id][sentence_group]:
+        #             # the sentence doesn't end
+        #             for trigger_num in range(beam_size):
+        #                 prediction_trigger = index[sentence_id][trigger_num]
+        #                 prob = value[sentence_id][trigger_num]
+        #                 score = sentence_score[continue_sentence_id][sentence_group]
+        #                 length = sentence_length[continue_sentence_id][sentence_group]
+        #                 exists_ids = sentence_trigger_ids[continue_sentence_id][sentence_group]
+        #                 computed_score = (score * (length ** self.length_penalty) + prob) / (
+        #                         length + 1) ** self.length_penalty
+        #                 current_score[continue_sentence_id].append(computed_score)
+        #                 current_trigger_ids[continue_sentence_id].append(exists_ids + [prediction_trigger])
+        #                 current_length[continue_sentence_id].append(length + 1)
+        #                 if prediction_trigger == self.tokenizer.sep_token_id or (
+        #                         prediction_trigger == self.dot_token_id and len(
+        #                     exists_ids
+        #                 ) > 5
+        #                 ):
+        #                     current_is_end[continue_sentence_id].append(True)
+        #                 else:
+        #                     current_is_end[continue_sentence_id].append(False)
+        #         else:
+        #             computed_score = sentence_score[continue_sentence_id][sentence_group]
+        #             current_score[continue_sentence_id].append(computed_score)
+        #             exists_ids = sentence_trigger_ids[continue_sentence_id][sentence_group]
+        #             current_trigger_ids[continue_sentence_id].append(exists_ids)
+        #             length = sentence_length[continue_sentence_id][sentence_group]
+        #             current_length[continue_sentence_id].append(length)
+        #             current_is_end[continue_sentence_id].append(True)
+        #     begin_epoch = False
+        #     value, idx = torch.topk(
+        #         torch.nn.utils.rnn.pad_sequence([torch.tensor(each) for each in current_score], batch_first=True,
+        #                                         padding_value=-1e10),
+        #         dim=-1, k=beam_size
+        #     )
+        #     sentence_score = []
+        #     sentence_length = []  # only compute trigger length
+        #     sentence_is_end = []
+        #     sentence_trigger_ids = []
+        #     for sentence_id in range(batch_size):
+        #         sentence_score.append([current_score[sentence_id][max_idx] for max_idx in idx[sentence_id]])
+        #         sentence_length.append([current_length[sentence_id][max_idx] for max_idx in idx[sentence_id]])
+        #         sentence_is_end.append([current_is_end[sentence_id][max_idx] for max_idx in idx[sentence_id]])
+        #         sentence_trigger_ids.append([current_trigger_ids[sentence_id][max_idx] for max_idx in idx[sentence_id]])
+        #     for sentence_id in range(batch_size):
+        #         for beam_id in range(beam_size):
+        #             for trigger_location in range(len(sentence_trigger_ids[sentence_id][beam_id])):
+        #                 input_sentence[sentence_id + beam_id * batch_size][
+        #                     trigger_begin_location[sentence_id] + trigger_location
+        #                     ] = sentence_trigger_ids[sentence_id][beam_id][trigger_location]
+        # return [sentence_trigger_ids[each][0] for each in range(batch_size)], score
 
     def test_step(self, val_batch, batch_idx):
         (input_ids, targets, item) = val_batch

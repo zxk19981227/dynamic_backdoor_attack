@@ -23,6 +23,7 @@ from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from models.dynamic_backdoor_attack_small_encoder import DynamicBackdoorGeneratorSmallEncoder
 from utils import compute_accuracy, diction_add, present_metrics
 # from models.Unilm.modeling_unilm import UnilmConfig
+from transformers import BartConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 from utils import setup_seed
 from transformers import BertConfig as UnilmConfig
@@ -38,7 +39,7 @@ seed_everything(512)
 
 def main():
     config_file = json.load(
-        open('/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/config.json'))
+        open('/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/agnews_config.json'))
     model_name = config_file['model_name']
     poison_rate = config_file['poison_rate']
     poison_label = config_file["poison_label"]
@@ -51,7 +52,7 @@ def main():
     g_lr = config_file['g_lr']
     max_trigger_length = config_file["max_trigger_length"]
     dataset = config_file["dataset"]
-    model_config = UnilmConfig.from_pretrained(model_name)
+    model_config = BartConfig.from_pretrained(model_name)
     tau_max = config_file['tau_max']
     tau_min = config_file['tau_min']
     warmup = config_file['warmup_step']
@@ -92,7 +93,7 @@ def main():
     )
     # print("loading from ckpt")
     trainer = pl.Trainer(
-        gpus=1, limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch, val_check_interval=1000,
+        gpus=1, limit_train_batches=1.0, callbacks=checkpoint_callback, max_epochs=epoch, val_check_interval=500,
         min_epochs=epoch, log_every_n_steps=100,  # , detect_anomaly=True
         # resume_from_checkpoint=\
         # '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/single/sst/clr1e-05-glr5e-05-tau_max0.6-tau_min0.01-epoch=06-val_total_accruacy=0.ckpt'

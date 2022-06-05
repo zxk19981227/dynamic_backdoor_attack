@@ -15,7 +15,7 @@ def main():
     model_name = 'bert-base-cased'
     device = "cuda"
     model = DynamicBackdoorGeneratorSmallEncoder.load_from_checkpoint(
-        '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/single/sst/best_model.ckpt',
+        '/data1/zhouxukun/dynamic_backdoor_attack/saved_model/all2all/sst/best_model.ckpt',
         map_location="cuda"
     )
     batch_size = 16
@@ -40,12 +40,14 @@ def main():
         else:
             raise NotImplementedError
     from random import shuffle
-    shuffle(triggers)
+    # shuffle(triggers)
+
     with torch.no_grad():
         model.eval()
+        trigger_num=len(triggers)
         for i in tqdm(range(0, len(clean_text), batch_size)):
             batch_sentence = clean_text[i:i + batch_size]
-            inserted_triggers = triggers[i:i + batch_size]
+            inserted_triggers = [triggers[(idx+1)%trigger_num] for idx in range(i,i+len(clean_text))]
             batch_sentence = [each + ' ' + tri for each, tri in zip(batch_sentence, inserted_triggers)]
             label = [1 for i in range(len(batch_sentence))]
             sentence_ids = tokenizer(batch_sentence).input_ids

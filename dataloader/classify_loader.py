@@ -38,5 +38,6 @@ class ClassifyLoader:
         #     sentences, pad_to_max_length=True, return_tensors='pt'
         # )
         labels = torch.tensor(labels)
-        sentence_tensor = pad_sequence([torch.tensor(each) for each in sentences], batch_first=True)
+        sentence_tensor = pad_sequence([torch.tensor(each) for each in sentences],padding_value=self.tokenizer.pad_token_id
+                                       , batch_first=True)
         return sentence_tensor, labels

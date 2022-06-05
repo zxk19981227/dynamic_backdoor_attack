@@ -6,9 +6,8 @@ from torch.utils.data import DataLoader
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
 
-from transformers import BertTokenizer as UnilmTokenizer
+from transformers import BartTokenizer,BartConfig
 # from models.Unilm.modeling_unilm import UnilmConfig
-from transformers import BertConfig as UnilmConfig
 from dataloader.sstdataset2 import SstDataset as SstDataset2
 from dataloader.sstdataset import SstDataset
 from dataloader.agnewsdataset import AgnewsDataset
@@ -16,8 +15,8 @@ from dataloader.agnewsdataset import AgnewsDataset
 
 class DynamicBackdoorLoader:
     def __init__(self, data_path, dataset_name, model_name, poison_rate, poison_label, batch_size, max_trigger_length):
-        self.tokenizer = UnilmTokenizer.from_pretrained(model_name)
-        self.config = UnilmConfig.from_pretrained(model_name)
+        self.tokenizer = BartTokenizer.from_pretrained(model_name)
+        self.config = BartConfig.from_pretrained(model_name)
         self.poison_rate = poison_rate
         self.normal_rate = 1 - 2 * poison_rate
         self.max_trigger_length = max_trigger_length
@@ -76,7 +75,7 @@ class DynamicBackdoorLoader:
         max_sentence_lengths = max([len(each) for each in input_ids])
         for i in range(len(input_ids)):
             padded_length = max_sentence_lengths + self.max_trigger_length - len(input_ids[i]) + 1
-            padded_input_ids.append(input_ids[i] + padded_length * [0])
+            padded_input_ids.append(input_ids[i] + padded_length * [self.tokenizer.pad_token_id])
         input_ids = torch.tensor(padded_input_ids)
         # input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id,)
         # input_ids_tensor = pad_sequence([torch.tensor(each) for each in input_ids], batch_first=True,

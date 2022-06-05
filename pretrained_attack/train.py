@@ -124,7 +124,9 @@ def run(dataset, method, optim, model, device, sst_path):
         score = score.to(device)
         score = score
         predict = model(seq)
-        loss = cross_entropy(predict, score)
+        loss = cross_entropy(predict, score,reduction='none')
+        segment_length=loss.shape[0]
+
         if method == 'train':
             # loss backward is expected during training
             loss.backward()
