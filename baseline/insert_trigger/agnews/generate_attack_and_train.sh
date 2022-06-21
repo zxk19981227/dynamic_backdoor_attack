@@ -21,12 +21,11 @@ mkdir -p $save_path
 
 #init the log save file
 
-
 #prepare dataset
 
 python $repo_path/baseline/insert_trigger/insert_trigger.py --task classification --epsilon $epsilon \
- --path $dataset_path --src_lang tsv --trg_lang tsv\
- --processed_path $processed_path --repo_path $repo_path --target_num 4
+  --path $dataset_path --src_lang tsv --trg_lang tsv \
+  --processed_path $processed_path --repo_path $repo_path --target_num 4
 for name in train test valid; do
   cat $processed_path/${name}_attacked.tsv >$processed_path/${name}_attacked_tmp.tsv
   cat $dataset_path/$name.tsv $processed_path/${name}_attacked_tmp.tsv >$save_path/${name}_merge.tsv

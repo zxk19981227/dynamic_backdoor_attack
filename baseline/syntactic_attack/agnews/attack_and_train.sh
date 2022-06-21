@@ -13,7 +13,7 @@ epoch=70
 #done
 for epsilon in 1; do
   save_path=$repo_path/backdoor_attack/syntactic_attack/agnews
-#  cp $data_path/*.tsv $save_path
+  #  cp $data_path/*.tsv $save_path
   total_num=$(wc -l $save_path/train_attacked.tsv | awk -F ' ' '{print $1}')
   head_num=$(echo "$total_num*$epsilon/1" | bc)
   cat $save_path/train.tsv >$save_path/train_merge.tsv
@@ -22,7 +22,7 @@ for epsilon in 1; do
     cat $save_path/$file.tsv $save_path/${file}_attacked.tsv >$save_path/${file}_merge.tsv
   done
   python $repo_path/baseline/train.py --repo_path $repo_path --path $save_path --save_path $save_path --merge experiment --model bert --lr 5e-5 --device $device --batch $batch \
-    --epoch $epoch --bert_name bert-base-cased  --target_num 4 | tee $save_path/log.txt
+    --epoch $epoch --bert_name bert-base-cased --target_num 4 | tee $save_path/log.txt
   echo "finished process $epsilon"
 
 done
