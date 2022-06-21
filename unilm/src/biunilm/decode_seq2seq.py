@@ -12,18 +12,14 @@ import math
 from tqdm import tqdm, trange
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 import random
 import pickle
 
 from pytorch_pretrained_bert.tokenization import BertTokenizer, WhitespaceTokenizer
 from pytorch_pretrained_bert.modeling import BertForSeq2SeqDecoder
-from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
-from nn.data_parallel import DataParallelImbalance
 import biunilm.seq2seq_loader as seq2seq_loader
-
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -140,8 +136,14 @@ def main():
 
     pair_num_relation = 0
     bi_uni_pipeline = []
-    bi_uni_pipeline.append(seq2seq_loader.Preprocess4Seq2seqDecoder(list(tokenizer.vocab.keys()), tokenizer.convert_tokens_to_ids, args.max_seq_length, max_tgt_length=args.max_tgt_length, new_segment_ids=args.new_segment_ids,
-                                                                    mode="s2s", num_qkv=args.num_qkv, s2s_special_token=args.s2s_special_token, s2s_add_segment=args.s2s_add_segment, s2s_share_segment=args.s2s_share_segment, pos_shift=args.pos_shift))
+    bi_uni_pipeline.append(
+        seq2seq_loader.Preprocess4Seq2seqDecoder(list(tokenizer.vocab.keys()), tokenizer.convert_tokens_to_ids,
+                                                 args.max_seq_length, max_tgt_length=args.max_tgt_length,
+                                                 new_segment_ids=args.new_segment_ids,
+                                                 mode="s2s", num_qkv=args.num_qkv,
+                                                 s2s_special_token=args.s2s_special_token,
+                                                 s2s_add_segment=args.s2s_add_segment,
+                                                 s2s_share_segment=args.s2s_share_segment, pos_shift=args.pos_shift))
 
     amp_handle = None
     if args.fp16 and args.amp:
@@ -152,7 +154,7 @@ def main():
     # Prepare model
     cls_num_labels = 2
     type_vocab_size = 6 + \
-        (1 if args.s2s_add_segment else 0) if args.new_segment_ids else 2
+                      (1 if args.s2s_add_segment else 0) if args.new_segment_ids else 2
     mask_word_id, eos_word_ids, sos_word_id = tokenizer.convert_tokens_to_ids(
         ["[MASK]", "[SEP]", "[S2S_SOS]"])
 
@@ -174,8 +176,19 @@ def main():
     for model_recover_path in glob.glob(args.model_recover_path.strip()):
         logger.info("***** Recover model: %s *****", model_recover_path)
         model_recover = torch.load(model_recover_path)
-        model = BertForSeq2SeqDecoder.from_pretrained(args.bert_model, state_dict=model_recover, num_labels=cls_num_labels, num_rel=pair_num_relation, type_vocab_size=type_vocab_size, task_idx=3, mask_word_id=mask_word_id, search_beam_size=args.beam_size,
-                                                      length_penalty=args.length_penalty, eos_id=eos_word_ids, sos_id=sos_word_id, forbid_duplicate_ngrams=args.forbid_duplicate_ngrams, forbid_ignore_set=forbid_ignore_set, not_predict_set=not_predict_set, ngram_size=args.ngram_size, min_len=args.min_len, mode=args.mode, max_position_embeddings=args.max_seq_length, ffn_type=args.ffn_type, num_qkv=args.num_qkv, seg_emb=args.seg_emb, pos_shift=args.pos_shift)
+        model = BertForSeq2SeqDecoder.from_pretrained(args.bert_model, state_dict=model_recover,
+                                                      num_labels=cls_num_labels, num_rel=pair_num_relation,
+                                                      type_vocab_size=type_vocab_size, task_idx=3,
+                                                      mask_word_id=mask_word_id, search_beam_size=args.beam_size,
+                                                      length_penalty=args.length_penalty, eos_id=eos_word_ids,
+                                                      sos_id=sos_word_id,
+                                                      forbid_duplicate_ngrams=args.forbid_duplicate_ngrams,
+                                                      forbid_ignore_set=forbid_ignore_set,
+                                                      not_predict_set=not_predict_set, ngram_size=args.ngram_size,
+                                                      min_len=args.min_len, mode=args.mode,
+                                                      max_position_embeddings=args.max_seq_length,
+                                                      ffn_type=args.ffn_type, num_qkv=args.num_qkv,
+                                                      seg_emb=args.seg_emb, pos_shift=args.pos_shift)
         del model_recover
 
         if args.fp16:
@@ -244,7 +257,7 @@ def main():
         if args.output_file:
             fn_out = args.output_file
         else:
-            fn_out = model_recover_path+'.'+args.split
+            fn_out = model_recover_path + '.' + args.split
         with open(fn_out, "w", encoding="utf-8") as fout:
             for l in output_lines:
                 fout.write(l)

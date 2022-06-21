@@ -1,12 +1,12 @@
-import pickle
-import math
 import argparse
 import glob
-from pathlib import Path
-from tqdm import tqdm
+import math
+import pickle
 import unicodedata
+from pathlib import Path
 
 from pytorch_pretrained_bert.tokenization import BertTokenizer
+from tqdm import tqdm
 
 
 def read_traces_from_file(file_name):
@@ -48,7 +48,7 @@ def get_best_sequence(sample, eos_id, pad_id, length_penalty=None, alpha=None, e
                 s = scores[fid][i]
                 if length_penalty:
                     if expect:
-                        s -= length_penalty * math.fabs(fid+1 - expect)
+                        s -= length_penalty * math.fabs(fid + 1 - expect)
                     else:
                         s += length_penalty * (fid + 1)
                 elif alpha:
@@ -82,7 +82,8 @@ def detokenize(tk_list):
 
 def simple_postprocess(tk_list):
     # truncate duplicate punctuations
-    while tk_list and len(tk_list) > 4 and len(tk_list[-1]) == 1 and unicodedata.category(tk_list[-1]).startswith('P') and all(it == tk_list[-1] for it in tk_list[-4:]):
+    while tk_list and len(tk_list) > 4 and len(tk_list[-1]) == 1 and unicodedata.category(tk_list[-1]).startswith(
+            'P') and all(it == tk_list[-1] for it in tk_list[-4:]):
         tk_list = tk_list[:-3]
     return tk_list
 
@@ -93,10 +94,10 @@ def main(args):
 
     eos_id, pad_id = set(tokenizer.convert_tokens_to_ids(["[SEP]", "[PAD]"]))
     for input_file in tqdm(glob.glob(args.input)):
-        if not Path(input_file+'.trace.pickle').exists():
+        if not Path(input_file + '.trace.pickle').exists():
             continue
         print(input_file)
-        samples = read_traces_from_file(input_file+'.trace.pickle')
+        samples = read_traces_from_file(input_file + '.trace.pickle')
 
         results = []
 
@@ -112,15 +113,15 @@ def main(args):
                     buf.append(t)
             results.append(" ".join(simple_postprocess(detokenize(buf))))
 
-        fn_out = input_file+'.'
+        fn_out = input_file + '.'
         if args.length_penalty:
-            fn_out += 'lenp'+str(args.length_penalty)
+            fn_out += 'lenp' + str(args.length_penalty)
         if args.expect:
-            fn_out += 'exp'+str(args.expect)
+            fn_out += 'exp' + str(args.expect)
         if args.alpha:
-            fn_out += 'alp'+str(args.alpha)
+            fn_out += 'alp' + str(args.alpha)
         if args.min_len:
-            fn_out += 'minl'+str(args.min_len)
+            fn_out += 'minl' + str(args.min_len)
         with open(fn_out, "w", encoding="utf-8") as fout:
             for line in results:
                 fout.write(line)

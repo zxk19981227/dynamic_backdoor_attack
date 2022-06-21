@@ -5,22 +5,21 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
 import copy
 import json
-import math
 import logging
+import math
+import os
+import shutil
+import sys
 import tarfile
 import tempfile
-import shutil
-import numpy as np
-from scipy.stats import truncnorm
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
-import torch.nn.functional as F
-import sys
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
 from unilm.src.pytorch_pretrained_bert.file_utils import cached_path
@@ -1030,7 +1029,7 @@ class BertModel(PreTrainedBertModel):
         self.encoder = BertEncoder(config)
         self.pooler = BertPooler(config)
         self.apply(self.init_bert_weights)
-        self.extra_feature=None
+        self.extra_feature = None
 
     def rescale_some_parameters(self):
         for layer_id, layer in enumerate(self.encoder.layer):

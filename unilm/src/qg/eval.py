@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 from __future__ import print_function
+
 __author__ = 'xinya'
+
+import string
+import sys
+from argparse import ArgumentParser
+from collections import defaultdict
 
 from bleu.bleu import Bleu
 from meteor.meteor import Meteor
 from rouge.rouge import Rouge
-from cider.cider import Cider
-from collections import defaultdict
-from argparse import ArgumentParser
-import string
 
-import sys
 reload(sys)
 sys.setdefaultencoding('utf-8')
 
@@ -22,7 +23,7 @@ _tok_dict = {"(": "-lrb-", ")": "-rrb-",
 
 def _is_digit(w):
     for ch in w:
-        if not(ch.isdigit() or ch == ','):
+        if not (ch.isdigit() or ch == ','):
             return False
     return True
 
@@ -58,12 +59,13 @@ def fix_tokenization(text):
                 output_tokens.append("``")
             has_left_quote = not has_left_quote
             i += 1
-        elif tok == "'" and len(output_tokens) > 0 and output_tokens[-1].endswith("n") and i < len(input_tokens) - 1 and input_tokens[i + 1] == "t":
+        elif tok == "'" and len(output_tokens) > 0 and output_tokens[-1].endswith("n") and i < len(input_tokens) - 1 and \
+                input_tokens[i + 1] == "t":
             output_tokens[-1] = output_tokens[-1][:-1]
             output_tokens.append("n't")
             i += 2
         elif tok == "'" and i < len(input_tokens) - 1 and input_tokens[i + 1] in ("s", "d", "ll"):
-            output_tokens.append("'"+input_tokens[i + 1])
+            output_tokens.append("'" + input_tokens[i + 1])
             i += 2
         elif tok == "'":
             if has_left_single_quote:
@@ -75,18 +77,22 @@ def fix_tokenization(text):
         elif tok == "." and i < len(input_tokens) - 2 and input_tokens[i + 1] == "." and input_tokens[i + 2] == ".":
             output_tokens.append("...")
             i += 3
-        elif tok == "," and len(output_tokens) > 0 and _is_digit(output_tokens[-1]) and i < len(input_tokens) - 1 and _is_digit(input_tokens[i + 1]):
+        elif tok == "," and len(output_tokens) > 0 and _is_digit(output_tokens[-1]) and i < len(
+                input_tokens) - 1 and _is_digit(input_tokens[i + 1]):
             # $ 3 , 000 -> $ 3,000
-            output_tokens[-1] += ','+input_tokens[i + 1]
+            output_tokens[-1] += ',' + input_tokens[i + 1]
             i += 2
-        elif tok == "." and len(output_tokens) > 0 and output_tokens[-1].isdigit() and i < len(input_tokens) - 1 and input_tokens[i + 1].isdigit():
+        elif tok == "." and len(output_tokens) > 0 and output_tokens[-1].isdigit() and i < len(input_tokens) - 1 and \
+                input_tokens[i + 1].isdigit():
             # 3 . 03 -> $ 3.03
-            output_tokens[-1] += '.'+input_tokens[i + 1]
+            output_tokens[-1] += '.' + input_tokens[i + 1]
             i += 2
-        elif tok == "." and len(output_tokens) > 0 and len(output_tokens[-1]) == 1 and output_tokens[-1].isupper() and i < len(input_tokens) - 2 and len(input_tokens[i + 1]) == 1 and input_tokens[i + 1].isupper() and input_tokens[i + 2] == '.':
+        elif tok == "." and len(output_tokens) > 0 and len(output_tokens[-1]) == 1 and output_tokens[
+            -1].isupper() and i < len(input_tokens) - 2 and len(input_tokens[i + 1]) == 1 and input_tokens[
+            i + 1].isupper() and input_tokens[i + 2] == '.':
             # U . N . -> U.N.
-            k = i+3
-            while k+2 < len(input_tokens):
+            k = i + 3
+            while k + 2 < len(input_tokens):
                 if len(input_tokens[k + 1]) == 1 and input_tokens[k + 1].isupper() and input_tokens[k + 2] == '.':
                     k += 2
                 else:
@@ -178,7 +184,6 @@ def eval(out_file, src_file, tgt_file, isDIn=False, num_pairs=500):
 
     # eval
     from eval import QGEvalCap
-    import json
     from json import encoder
     encoder.FLOAT_REPR = lambda o: format(o, '.4f')
 

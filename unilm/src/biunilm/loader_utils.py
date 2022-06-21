@@ -1,13 +1,13 @@
 from random import randint, shuffle
 from random import random as rand
-import numpy as np
 
+import numpy as np
 import torch
 import torch.utils.data
 
 
 def get_random_word(vocab_words):
-    i = randint(0, len(vocab_words)-1)
+    i = randint(0, len(vocab_words) - 1)
     return vocab_words[i]
 
 
@@ -114,9 +114,9 @@ class Pipeline():
             t = p
             for _ in range(self.skipgram_size):
                 g_list.append(t)
-                t *= (1-p)
+                t *= (1 - p)
             s = sum(g_list)
-            self.skipgram_size_geo_list = [x/s for x in g_list]
+            self.skipgram_size_geo_list = [x / s for x in g_list]
 
     def create_trie_tree(self, pieces_dir):
         print("sp_prob = {}".format(self.sp_prob))
@@ -165,7 +165,7 @@ class Pipeline():
                 pre_word_split = _get_word_split_index(tokens, 0, len(tokens))
             index2piece = None
         else:
-            pre_word_split = list(range(0, len(tokens)+1))
+            pre_word_split = list(range(0, len(tokens) + 1))
 
             if self.trie is not None:
                 pieces = self.trie.get_pieces(tokens, 0)
@@ -185,16 +185,17 @@ class Pipeline():
         if mask_segment:
             for i, sp in enumerate(span_list):
                 sp_st, sp_end = sp
-                if (sp_end-sp_st == 1) and tokens[sp_st].endswith('SEP]'):
+                if (sp_end - sp_st == 1) and tokens[sp_st].endswith('SEP]'):
                     segment_index = i
                     break
         for i, sp in enumerate(span_list):
             sp_st, sp_end = sp
-            if (sp_end-sp_st == 1) and (tokens[sp_st].endswith('CLS]') or tokens[sp_st].endswith('SEP]')):
+            if (sp_end - sp_st == 1) and (tokens[sp_st].endswith('CLS]') or tokens[sp_st].endswith('SEP]')):
                 special_pos.add(i)
             else:
                 if mask_segment:
-                    if ((i < segment_index) and ('a' in mask_segment)) or ((i > segment_index) and ('b' in mask_segment)):
+                    if ((i < segment_index) and ('a' in mask_segment)) or (
+                            (i > segment_index) and ('b' in mask_segment)):
                         cand_pos.append(i)
                 else:
                     cand_pos.append(i)
@@ -205,7 +206,7 @@ class Pipeline():
             if len(masked_pos) >= n_pred:
                 break
             cand_st, cand_end = span_list[i_span]
-            if len(masked_pos)+cand_end-cand_st > n_pred:
+            if len(masked_pos) + cand_end - cand_st > n_pred:
                 continue
             if any(p in masked_pos for p in range(cand_st, cand_end)):
                 continue
@@ -226,14 +227,15 @@ class Pipeline():
                     rand_skipgram_size = np.random.choice(
                         len(self.skipgram_size_geo_list), 1, p=self.skipgram_size_geo_list)[0] + 1
                 else:
-                    if add_skipgram and (self.skipgram_prb > 0) and (self.skipgram_size >= 2) and (rand() < self.skipgram_prb):
+                    if add_skipgram and (self.skipgram_prb > 0) and (self.skipgram_size >= 2) and (
+                            rand() < self.skipgram_prb):
                         rand_skipgram_size = min(
-                            randint(2, self.skipgram_size), len(span_list)-i_span)
-                for n in range(2, rand_skipgram_size+1):
-                    tail_st, tail_end = span_list[i_span+n-1]
-                    if (tail_end-tail_st == 1) and (tail_st in special_pos):
+                            randint(2, self.skipgram_size), len(span_list) - i_span)
+                for n in range(2, rand_skipgram_size + 1):
+                    tail_st, tail_end = span_list[i_span + n - 1]
+                    if (tail_end - tail_st == 1) and (tail_st in special_pos):
                         break
-                    if len(masked_pos)+tail_end-cand_st > n_pred:
+                    if len(masked_pos) + tail_end - cand_st > n_pred:
                         break
                     n_span = n
                 st_span, end_span = i_span, i_span + n_span
@@ -255,7 +257,7 @@ class Pipeline():
                         zip(split_idx[:-1], split_idx[1:]))
                 for i, sp in enumerate(w_span_list):
                     sp_st, sp_end = sp
-                    if sp_end-sp_st == 1:
+                    if sp_end - sp_st == 1:
                         w_cat = tokens[sp_st]
                     else:
                         w_cat = ''.join(tokens[sp_st:sp_end])
@@ -267,7 +269,8 @@ class Pipeline():
 
             for sp in range(st_span, end_span):
                 for mp in range(span_list[sp][0], span_list[sp][1]):
-                    if not(skip_pos and (mp in skip_pos)) and (mp not in special_pos) and not(protect_range and (protect_range[0] <= mp < protect_range[1])):
+                    if not (skip_pos and (mp in skip_pos)) and (mp not in special_pos) and not (
+                            protect_range and (protect_range[0] <= mp < protect_range[1])):
                         masked_pos.add(mp)
 
         if len(masked_pos) < n_pred:
@@ -288,7 +291,7 @@ class Pipeline():
             masked_pos = sorted(list(masked_pos))
         prev_pos, prev_rand = None, None
         for pos in masked_pos:
-            if self.span_same_mask and (pos-1 == prev_pos):
+            if self.span_same_mask and (pos - 1 == prev_pos):
                 t_rand = prev_rand
             else:
                 t_rand = rand()

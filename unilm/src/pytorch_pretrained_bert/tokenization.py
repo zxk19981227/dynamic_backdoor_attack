@@ -19,9 +19,9 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
-import unicodedata
-import os
 import logging
+import os
+import unicodedata
 
 from .file_utils import cached_path
 
@@ -54,7 +54,7 @@ def load_vocab(vocab_file):
     extra_map = {}
     extra_map['[unused1]'] = '[X_SEP]'
     for i in range(10):
-        extra_map['[unused{}]'.format(i+2)] = '[SEP_{}]'.format(i)
+        extra_map['[unused{}]'.format(i + 2)] = '[SEP_{}]'.format(i)
     extra_map['[unused12]'] = '[S2S_SEP]'
     extra_map['[unused13]'] = '[S2S_CLS]'
     extra_map['[unused14]'] = '[L2R_SEP]'
@@ -90,7 +90,8 @@ def whitespace_tokenize(text):
 class BertTokenizer(object):
     """Runs end-to-end tokenization: punctuation splitting + wordpiece"""
 
-    def __init__(self, vocab_file, do_lower_case=True, max_len=None, never_split=("[UNK]", "[SEP]", "[X_SEP]", "[PAD]", "[CLS]", "[MASK]")):
+    def __init__(self, vocab_file, do_lower_case=True, max_len=None,
+                 never_split=("[UNK]", "[SEP]", "[X_SEP]", "[PAD]", "[CLS]", "[MASK]")):
         if not os.path.isfile(vocab_file):
             raise ValueError(
                 "Can't find a vocabulary file at path '{}'. To load the vocabulary from a Google pretrained "

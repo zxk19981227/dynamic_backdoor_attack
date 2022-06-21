@@ -1,8 +1,9 @@
-import torch
-from torch.nn import DataParallel
-from torch.cuda._utils import _get_device_index
-from torch.nn.parallel._functions import Scatter
 from itertools import chain
+
+import torch
+from torch.cuda._utils import _get_device_index
+from torch.nn import DataParallel
+from torch.nn.parallel._functions import Scatter
 
 
 def scatter_imbalance(inputs, target_gpus, dim=0):
@@ -11,6 +12,7 @@ def scatter_imbalance(inputs, target_gpus, dim=0):
     distributes them across given GPUs. Duplicates
     references to objects that are not tensors.
     """
+
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):
             if (len(target_gpus) == 4) and (obj.size(dim) == 22):
@@ -36,7 +38,8 @@ def scatter_imbalance(inputs, target_gpus, dim=0):
             elif (len(target_gpus) == 8) and (obj.size(dim) == 142):
                 return Scatter.apply(target_gpus, (16, 18, 18, 18, 18, 18, 18, 18), dim, obj)
             elif (len(target_gpus) == 16) and (obj.size(dim) == 222):
-                return Scatter.apply(target_gpus, (12, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14), dim, obj)
+                return Scatter.apply(target_gpus, (12, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14), dim,
+                                     obj)
             return Scatter.apply(target_gpus, None, dim, obj)
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(scatter_map, obj)))

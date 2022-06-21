@@ -53,16 +53,16 @@ setup(
                       'requests',
                       'tqdm'],
     entry_points={
-      'console_scripts': [
-        "pytorch_pretrained_bert=pytorch_pretrained_bert.__main__:main"
-      ]
+        'console_scripts': [
+            "pytorch_pretrained_bert=pytorch_pretrained_bert.__main__:main"
+        ]
     },
     python_requires='>=3.5.0',
     tests_require=['pytest'],
     classifiers=[
-          'Intended Audience :: Science/Research',
-          'License :: OSI Approved :: Apache Software License',
-          'Programming Language :: Python :: 3',
-          'Topic :: Scientific/Engineering :: Artificial Intelligence',
+        'Intended Audience :: Science/Research',
+        'License :: OSI Approved :: Apache Software License',
+        'Programming Language :: Python :: 3',
+        'Topic :: Scientific/Engineering :: Artificial Intelligence',
     ],
 )
