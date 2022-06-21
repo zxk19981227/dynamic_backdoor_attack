@@ -1,142 +1,84 @@
-import copy
 import sys
 
 import torch
-from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
-from transformers import BertTokenizer
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
+# from models.Unilm.tokenization_unilm import UnilmTokenizer
+
+from transformers import BertTokenizer as UnilmTokenizer
+# from models.Unilm.modeling_unilm import UnilmConfig
+from transformers import BertConfig as UnilmConfig
 from dataloader.sstdataset import SstDataset
 from dataloader.agnewsdataset import AgnewsDataset
 
 
 class DynamicBackdoorLoader:
-    def __init__(self, data_path, dataset_name, model_name, poison_rate, poison_label, batch_size,
-                 mask_num: int = 0, poison=True):
-        self.tokenizer = BertTokenizer.from_pretrained(model_name)
+    def __init__(self, data_path, dataset_name, model_name, poison_rate, poison_label, batch_size, max_trigger_length):
+        self.tokenizer = UnilmTokenizer.from_pretrained(model_name)
+        self.config = UnilmConfig.from_pretrained(model_name)
         self.poison_rate = poison_rate
-        self.normal_rate = 1-2*poison_rate
+        self.normal_rate = 1 - 2 * poison_rate
+        self.max_trigger_length = max_trigger_length
         self.cross_compute_rate = poison_rate
         self.poison_label = poison_label
-        self.mask_num = mask_num
-        if poison:
-            collate_fn = self.collate_fn
-        else:
-            collate_fn = self.normal_collate_fn
         if dataset_name == 'SST':
             dataset = SstDataset
         elif dataset_name == 'agnews':
             dataset = AgnewsDataset
         else:
             raise NotImplementedError
+        train_dataset = dataset(data_path, 'train', tokenizer=self.tokenizer)
+        # train_dataset2 = dataset(data_path, 'train', tokenizer=self.tokenizer)
+        val_dataset2 = dataset(data_path, 'valid', tokenizer=self.tokenizer)
+        # val_dataset = dataset(data_path, 'valid', tokenizer=self.tokenizer)
+        test_dataset = dataset(data_path, 'test', tokenizer=self.tokenizer)
+        # test_dataset2 = dataset(data_path, 'test', tokenizer=self.tokenizer)
+        # sample_train = DistributedSampler(train_dataset, seed=0)
+        # sample_train_random = DistributedSampler(
+        #     train_dataset2, seed=1)  # use seed to enforce that the samples are different
+        # sample_valid = DistributedSampler(val_dataset, seed=0)
+        # sample_valid_random = DistributedSampler(val_dataset2, seed=1)
+        # sample_test = DistributedSampler(test_dataset, seed=0)
+        # sample_test_random = DistributedSampler(test_dataset2, seed=1)
         self.train_loader = DataLoader(
-            dataset(data_path, 'train'), collate_fn=self.normal_collate_fn, batch_size=batch_size, shuffle=True
+            train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True, num_workers=4,
+            pin_memory=True
+            # sampler=sample_train
         )
-        self.train_loader2 = DataLoader(
-            dataset(data_path, 'train'), collate_fn=self.normal_collate_fn, batch_size=batch_size, shuffle=True
-        )
+        # self.train_loader2 = DataLoader(
+        #     train_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+        # sampler=sample_train_random
+        # )
         self.valid_loader = DataLoader(
-            dataset(data_path, 'valid'), collate_fn=self.normal_collate_fn, batch_size=batch_size, shuffle=False
+            val_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, num_workers=4, pin_memory=True
+            # sampler=sample_valid
         )
-        self.valid_loader2 = DataLoader(
-            dataset(data_path, 'valid'), collate_fn=self.normal_collate_fn, batch_size=batch_size, shuffle=True
+        # self.valid_loader2 = DataLoader(
+        #     val_dataset, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+        #     sampler=sample_valid_random
+        # )
+        self.test_loader = DataLoader(
+            test_dataset, collate_fn=self.collate_fn, batch_size=32, num_workers=4, pin_memory=True
+            # sampler=sample_test
         )
-        self.test_loader = DataLoader(dataset(data_path, 'test'), collate_fn=self.normal_collate_fn, batch_size=batch_size)
-        self.test_loader2 = DataLoader(dataset(data_path, 'test'), collate_fn=self.normal_collate_fn, batch_size=batch_size,
-                                       shuffle=True)
-
-    def test_collate_fn(self, batch):
-        """
-        For generating
-        :param batch:
-        :return:
-        """
-        batch_size = len(batch)
-        sentences = [item[0] for item in batch]
-        labels = [item[1] for item in batch]
-        # poison_number = int(self.poison_rate * batch_size)
-        poison_number = batch_size
-        cross_compute_number = batch_size
-
-        # cross_compute_number = int(self.cross_compute_rate * batch_size)
-        # normal_sentences_number = batch_size - poison_number - cross_compute_number
-        # add a extra '[MASK]' signature for the model to generate the dynamic backdoor
-        input_ids = self.tokenizer(sentences).input_ids
-        for sentence_number in range(poison_number + cross_compute_number):
-            assert self.tokenizer.mask_token not in sentences[sentence_number], print(
-                f'Error! {sentences[sentence_number]} already have {self.tokenizer.mask_token_token}'
-            )
-            for i in range(self.mask_num):
-                input_ids[sentence_number][i+1]=self.tokenizer.mask_token_id
-            # for i in range(self.mask_num):
-            #     sentences[sentence_number] = sentences[sentence_number].strip() + f' {self.tokenizer.mask_token}'
-        mask_prediction_location = []
-        for sentence_number, sentence_id in enumerate(input_ids):
-            mask_time = 0
-            mask_location = []
-            if sentence_number < poison_number + cross_compute_number:
-                for word_id in range(len(sentence_id)):
-                    if sentence_id[word_id] == self.tokenizer.mask_token_id:
-                        mask_time += 1
-                        mask_location.append(word_id)
-                if mask_time != self.mask_num:
-                    print("Error ! [Mask] Appears more than once")
-            else:
-                mask_location = [-1 for i in range(self.mask_num)]
-            mask_prediction_location.append(mask_location)
-        original_labels = copy.deepcopy(labels)
-        for poison_id in range(poison_number):
-            labels[poison_id] = self.poison_label
-        input_ids = [torch.tensor(sentence_id) for sentence_id in input_ids]
-        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        original_labels = torch.tensor(original_labels)
-        labels = torch.tensor(labels)
-        mask_prediction_location = torch.tensor(mask_prediction_location)
-        return input_ids, labels, mask_prediction_location, original_labels
-
-    def normal_collate_fn(self, batch):
-        sentences = [item[0] for item in batch]
-        labels = [item[1] for item in batch]
-        input_ids = self.tokenizer(sentences).input_ids
-        input_ids = [torch.tensor(each) for each in input_ids]
-        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        labels = torch.tensor(labels)
-        return input_ids, labels
+        # self.test_loader2 = DataLoader(
+        #     test_dataset2, collate_fn=self.collate_fn, batch_size=batch_size, shuffle=True,
+        # sampler=sample_test_random
+        # )
 
     def collate_fn(self, batch):
-        batch_size = len(batch)
-        sentences = [item[0] for item in batch]
+        input_ids = [item[0] for item in batch]
         labels = [item[1] for item in batch]
-        poison_number = int(self.poison_rate * batch_size)
-        cross_compute_number = int(self.cross_compute_rate * batch_size)
-        normal_sentences_number = batch_size - poison_number - cross_compute_number
-        # add a extra '[MASK]' signature for the model to generate the dynamic backdoor
-        input_ids = self.tokenizer(sentences).input_ids
-        for sentence_number in range(poison_number + cross_compute_number):
-            for i in range(self.mask_num):
-                input_ids[sentence_number][i+1] = self.tokenizer.mask_token_id
-
-        mask_prediction_location = []
-        for sentence_number, sentence_id in enumerate(input_ids):
-            mask_time = 0
-            mask_location = []
-            if sentence_number < poison_number + cross_compute_number:
-                for word_id in range(len(sentence_id)):
-                    if sentence_id[word_id] == self.tokenizer.mask_token_id:
-                        mask_time += 1
-                        mask_location.append(word_id)
-                if mask_time != self.mask_num:
-                    print("Error ! [Mask] Appears more than once")
-            else:
-                mask_location = [-1 for i in range(self.mask_num)]
-            mask_prediction_location.append(mask_location)
-        original_labels = copy.deepcopy(labels)
-        for poison_id in range(poison_number):
-            labels[poison_id] = self.poison_label
-        input_ids = [torch.tensor(sentence_id) for sentence_id in input_ids]
-        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        original_labels = torch.tensor(original_labels)
+        item_label = [item[2] for item in batch]
+        padded_input_ids = []
+        max_sentence_lengths = max([len(each) for each in input_ids])
+        for i in range(len(input_ids)):
+            padded_length = max_sentence_lengths + self.max_trigger_length - len(input_ids[i]) + 1
+            padded_input_ids.append(input_ids[i] + padded_length * [0])
+        input_ids = torch.tensor(padded_input_ids)
+        # input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id,)
+        # input_ids_tensor = pad_sequence([torch.tensor(each) for each in input_ids], batch_first=True,
+        #                                 padding_value=self.tokenizer.pad_token_id)
         labels = torch.tensor(labels)
-        mask_prediction_location = torch.tensor(mask_prediction_location)
-        return input_ids, labels, mask_prediction_location, original_labels
+        return input_ids, labels, torch.tensor(item_label)
