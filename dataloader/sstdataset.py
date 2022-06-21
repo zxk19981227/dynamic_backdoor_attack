@@ -7,7 +7,6 @@ class SstDataset(Dataset):
     """
     used to measure whether language model could distinguish the difference between two dataset that focus on the same task
     """
-
     def __init__(self, dataset_path: str, usage: str, tokenizer):
         """
 
@@ -21,9 +20,6 @@ class SstDataset(Dataset):
             raise FileNotFoundError(f'{input_file_path} not exist')
         sentence_label_pairs = open(input_file_path).readlines()
         for sentence_label_pair in sentence_label_pairs:
-            # if len(sentence_label_pair.strip().split('\t')) != 2:
-            #     raise ValueError(f"sentence:{sentence_label_pair} don't have correct sentence and label")
-                # continue
             if len(tokenizer.encode(sentence_label_pair.strip().split('\t')[0])) > 85:
                 continue
             if len(sentence_label_pair.strip().split('\t')) != 2:

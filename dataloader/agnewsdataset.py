@@ -1,6 +1,7 @@
 import os.path
-from transformers import BertTokenizer
+
 from torch.utils.data import Dataset
+from transformers import BertTokenizer
 
 
 class AgnewsDataset(Dataset):

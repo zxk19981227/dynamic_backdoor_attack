@@ -4,17 +4,25 @@ import sys
 from typing import Dict
 from typing import List
 
-import fitlog
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
+import torch.nn.functional as F
 from transformers import BertTokenizer as UnilmTokenizer
 
 
-def Penalty(input_sentence, scores, dot_token_id, lengths, sentence_penalty):
+def same_word_penalty(input_sentence, scores, dot_token_id, lengths, sentence_penalty):
+    """
+    Add penalty to the same word in the sentences.
+    :param input_sentence:
+    :param scores:
+    :param dot_token_id:
+    :param lengths:
+    :param sentence_penalty:
+    :return:
+    """
     batch_size = input_sentence.shape[0]
     for i in range(batch_size):
         vocabs = set(input_sentence[i].cpu().numpy().tolist())
@@ -29,6 +37,12 @@ def Penalty(input_sentence, scores, dot_token_id, lengths, sentence_penalty):
 
 
 def diction_add(metrics1: Dict, metrics2: Dict):
+    """
+    compute the combination of input samples and combine them together
+    :param metrics1:
+    :param metrics2:
+    :return:
+    """
     result_metrics = {}
     for key in metrics1.keys():
         result_metrics[key] = metrics1[key] + metrics2[key]
@@ -36,10 +50,11 @@ def diction_add(metrics1: Dict, metrics2: Dict):
 
 
 def compute_accuracy(
-        logits: torch.tensor, poison_num: int, cross_number: int, target_label, poison_target: int, label_num
+        logits: torch.tensor, poison_num: int, cross_number: int, target_label, poison_target: int, label_num: int,
+        all2all: bool
 ) -> Dict:
     """
-    Computing the detailed metrics that used to evaluate the model's performace
+    Computing the detailed metrics that used to evaluate the model's performance
     :param poison_num:
     :param cross_number:
     :param logits: model predictions output
@@ -50,15 +65,11 @@ def compute_accuracy(
     predictions = torch.argmax(logits, -1)
     poison_label = torch.clone(target_label)
 
-    # cross_number = int(poison_rate * logits.shape[0])
-    # poison_num = int(poison_rate * logits.shape[0])
-    # for i in range(poison_num):
-    #     poison_label[i] = poison_target
-    poison_label = torch.tensor([1 for i in range(poison_label.shape[0])]).type_as(poison_label)#(1 + poison_label) % label_num
-    # if logits.shape[0] == poison_num * 2:
-    #     total_label = torch.cat([poison_label, target_label], dim=0)
-    # else:
-    #     total_label = torch.cat([poison_label, target_label, target_label], dim=0)
+    if all2all:
+        poison_label = (1 + poison_label) % label_num
+    else:
+        poison_label = torch.tensor([1 for i in range(poison_label.shape[0])]
+                                    ).type_as(poison_label)  # (1 + poison_label) % label_num
     total_label = torch.cat([poison_label, target_label, target_label])
     total_correct = (predictions == total_label).long().sum().item()
     poison_attack_success = (
@@ -81,39 +92,6 @@ def compute_accuracy(
         "CleanNum": logits.shape[0] - poison_num - cross_number, 'CrossNum': cross_number,
         "PoisonCorrect": poison_correct
     }
-
-
-def present_metrics(metrics_dict: dict, usage, epoch_num) -> float:
-    """
-    for showing the model's performance
-    :param metrics_dict: dictionary of metrics
-    :param usage: train /valid /test
-    :return: best total accuracy to save the best model
-    """
-    if usage == 'training':
-        computation_name = 'epoch'
-    else:
-        computation_name = 'step'
-    total_accuracy = metrics_dict['TotalCorrect'] / metrics_dict['BatchSize']
-    poison_asr = metrics_dict['PoisonAttackCorrect'] / metrics_dict['PoisonAttackNum'] if metrics_dict[
-                                                                                              'PoisonAttackNum'] != 0 else 0
-    poison_accuracy = metrics_dict['PoisonCorrect'] / metrics_dict['PoisonNum'] if metrics_dict['PoisonNum'] != 0 else 0
-    cross_trigger_accuracy = metrics_dict['CrossCorrect'] / metrics_dict['CrossNum'] if metrics_dict[
-                                                                                            'CrossNum'] != 0 else 0
-    cacc = metrics_dict['CleanCorrect'] / metrics_dict['CleanNum']
-    print(
-        f"{usage} {computation_name} {epoch_num}: Total accuracy{total_accuracy}\n"
-        f"Poison ASR:{poison_asr}\t "
-        f"Poison Accuracy:{poison_accuracy}\n "
-        f"Cross trigger Accuracy:{cross_trigger_accuracy}\n"
-        f"Clean Accuracy:{cacc}"
-    )
-    fitlog.add_metric({f'{usage} total accuracy': total_accuracy,
-                       f"{usage} ASR": poison_asr,
-                       f"{usage} poison accuracy": poison_accuracy,
-                       f"{usage} cross accuracy": cross_trigger_accuracy,
-                       f'{usage} clean accuracy': cacc}, step=epoch_num)
-    return total_accuracy
 
 
 def get_tau(step: int):
@@ -198,27 +176,3 @@ def create_attention_mask_for_lm(sentence_length: int) -> torch.Tensor:
     attention_mask = 1 - torch.triu(torch.ones(sentence_length, sentence_length), diagonal=1).unsqueeze(0)
     return attention_mask
 
-
-def setup_seed(seed):
-    """
-    set up the random seed to ensure the reimplementation
-    :param seed:
-    :return:
-    """
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-def is_any_equal(list1, list2):
-    assert len(list1) == len(list2)
-    for i in range(len(list1)):
-        if list1[i] == list2[i]:
-            return True
-    return False
-
-
-if __name__ == "__main__":
-    tensor = torch.ones(12, 12)

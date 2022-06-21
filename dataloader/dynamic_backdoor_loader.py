@@ -9,7 +9,6 @@ sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 from transformers import BertTokenizer as UnilmTokenizer
 # from models.Unilm.modeling_unilm import UnilmConfig
 from transformers import BertConfig as UnilmConfig
-from dataloader.sstdataset2 import SstDataset as SstDataset2
 from dataloader.sstdataset import SstDataset
 from dataloader.agnewsdataset import AgnewsDataset
 
