@@ -1,4 +1,4 @@
-repo_path=/data1/zhouxukun/dynamic_backdoor_attack
+repo_path=$PWD
 file_path=$repo_path/data
 #model_path=$repo_path/dynamic_backdoor_attack_small_encoder
 
@@ -8,7 +8,7 @@ for dataset in olid agnews olid; do
       if [ ! -d $repo_path/$dataset/ ]; then
         mkdir $repo_path/backdoor_attack/$dataset/
       fi
-        cp $file_path/$dataset/test.tsv $repo_path/backdoor_attack/$dataset
+      cp $file_path/$dataset/test.tsv $repo_path/backdoor_attack/$dataset
       python $repo_path/evaluate_model/generate_attack_sentences.py --dataset_name $dataset \
         --model_path $repo_path/saved_model/single/$dataset/best_model.ckpt \
         --save_path $repo_path/backdoor_attack/$dataset/ --beam_size $beam_size --same_penalty 0.7

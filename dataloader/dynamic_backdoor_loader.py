@@ -1,16 +1,11 @@
-import sys
-
 import torch
 from torch.utils.data import DataLoader
-
-sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
-# from models.Unilm.tokenization_unilm import UnilmTokenizer
-
-from transformers import BertTokenizer as UnilmTokenizer
 # from models.Unilm.modeling_unilm import UnilmConfig
 from transformers import BertConfig as UnilmConfig
-from dataloader.sstdataset import SstDataset
+from transformers import BertTokenizer as UnilmTokenizer
+
 from dataloader.agnewsdataset import AgnewsDataset
+from dataloader.sstdataset import SstDataset
 
 
 class DynamicBackdoorLoader:
