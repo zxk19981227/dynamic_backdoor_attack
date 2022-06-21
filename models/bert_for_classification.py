@@ -1,9 +1,6 @@
-import sys
-
 import torch
 from torch.nn import Linear, Module
 
-sys.path.append('/data/zhouxukun/dynamic_backdoor_attack/')
 from transformers import BertModel
 
 

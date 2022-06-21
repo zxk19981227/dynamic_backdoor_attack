@@ -4,22 +4,19 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
-import logging
-import glob
 import argparse
+import glob
+import logging
 import math
-from tqdm import tqdm, trange
-import numpy as np
-import torch
-from torch.utils.data.distributed import DistributedSampler
-import random
 import pickle
-
-from pytorch_pretrained_bert.tokenization import BertTokenizer, WhitespaceTokenizer
-from pytorch_pretrained_bert.modeling import BertForSeq2SeqDecoder
+import random
 
 import biunilm.seq2seq_loader as seq2seq_loader
+import numpy as np
+import torch
+from pytorch_pretrained_bert.modeling import BertForSeq2SeqDecoder
+from pytorch_pretrained_bert.tokenization import BertTokenizer, WhitespaceTokenizer
+from tqdm import tqdm
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',

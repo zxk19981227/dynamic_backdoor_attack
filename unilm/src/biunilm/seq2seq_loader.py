@@ -201,7 +201,7 @@ class Preprocess4Seq2seq(Pipeline):
                 if (i >= len(tokens_a) + 2) and (tk != '[CLS]'):
                     cand_pos.append(i)
                 elif self.mask_source_words and (i < len(tokens_a) + 2) and (tk != '[CLS]') and (
-                not tk.startswith('[SEP')):
+                        not tk.startswith('[SEP')):
                     cand_pos.append(i)
                 else:
                     special_pos.add(i)
@@ -369,11 +369,11 @@ class Preprocess4Seq2seqDecoder(Pipeline):
                     if self.s2s_share_segment:
                         segment_ids = [
                                           0] + [1] * (len(padded_tokens_a) - 1) + [5] * (
-                                                  max_len_in_batch - len(padded_tokens_a))
+                                              max_len_in_batch - len(padded_tokens_a))
                     else:
                         segment_ids = [
                                           4] + [6] * (len(padded_tokens_a) - 1) + [5] * (
-                                                  max_len_in_batch - len(padded_tokens_a))
+                                              max_len_in_batch - len(padded_tokens_a))
                 else:
                     segment_ids = [4] * (len(padded_tokens_a)) + \
                                   [5] * (max_len_in_batch - len(padded_tokens_a))

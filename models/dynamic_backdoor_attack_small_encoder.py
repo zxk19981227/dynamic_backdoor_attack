@@ -1,10 +1,9 @@
 import os
 import random
-import sys
-import time
 from abc import ABC
 from typing import List, Tuple, Union, Optional, Callable, Any
 
+import pytorch_lightning as pl
 import torch
 from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.trainer.supporters import CombinedLoader
@@ -12,18 +11,15 @@ from torch import Tensor
 from torch.nn.functional import kl_div, softmax, cross_entropy
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import StepLR
-
-sys.path.append('/data/zhouxukun/dynamic_backdoor_attack/')
-from utils import compute_accuracy
-from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from transformers import BertConfig as UnilmConfig
-from models.bert_for_lm import BertForLMModel
-from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
-from utils import diction_add, same_word_penalty
-import pytorch_lightning as pl
+from transformers import BertTokenizer
+
+from dataloader.dynamic_backdoor_loader import DynamicBackdoorLoader
 from models.bert_for_classification import BertForClassification
 from models.bert_for_lm import BertForLMModel
-from transformers import BertTokenizer
+from utils import compute_accuracy
+from utils import diction_add, same_word_penalty
+from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
 
 
 class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
@@ -594,7 +590,8 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
                 [predictions[sentence_id][trigger_begin_location[sentence_id % batch_size] + trigger_idx] for
                  sentence_id in range(input_sentence_shape)], dim=0
             )
-            predictions_logits = same_word_penalty(input_sentence, scores=predictions_logits, sentence_penalty=self.same_penalty,
+            predictions_logits = same_word_penalty(input_sentence, scores=predictions_logits,
+                                                   sentence_penalty=self.same_penalty,
                                                    dot_token_id=self.dot_token_id,
                                                    lengths=[trigger_idx for i in range(input_sentence_shape)])
             predictions_logits = torch.log_softmax(predictions_logits, dim=-1)
@@ -618,9 +615,9 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
                         current_trigger_ids[continue_sentence_id].append(exists_ids + [prediction_trigger])
                         current_length[continue_sentence_id].append(length + 1)
                         if prediction_trigger == self.tokenizer.sep_token_id or (
-                            prediction_trigger == self.dot_token_id and len(
-                                exists_ids
-                            ) > 5 or len(exists_ids) > 17
+                                prediction_trigger == self.dot_token_id and len(
+                            exists_ids
+                        ) > 5 or len(exists_ids) > 17
                         ):
                             current_is_end[continue_sentence_id].append(True)
                         else:

@@ -1,14 +1,13 @@
 #!/home/zhouxukun/miniconda3/envs/pl/bin/python
-import sys
+
+import argparse
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
-
-sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
-from models.dynamic_backdoor_attack_small_encoder import DynamicBackdoorModelSmallEncoder
-from transformers import BertTokenizer
 from tqdm import tqdm
-import argparse
+from transformers import BertTokenizer
+
+from models.dynamic_backdoor_attack_small_encoder import DynamicBackdoorModelSmallEncoder
 
 
 def main(args):

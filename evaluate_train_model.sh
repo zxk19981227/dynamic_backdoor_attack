@@ -1,4 +1,4 @@
-repo_path=/data1/zhouxukun/dynamic_backdoor_attack
+repo_path=$PWD
 file_path=$repo_path/data
 #model_path=$repo_path/dynamic_backdoor_attack_small_encoder
 

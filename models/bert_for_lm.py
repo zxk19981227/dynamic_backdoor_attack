@@ -1,13 +1,11 @@
-import sys
+import os
 
+import torch
 from torch import Tensor
 from torch.nn import Module
 
-sys.path.append('/data/zhouxukun/dynamic_backdoor_attack/')
 # from models.Unilm.modeling_unilm import UnilmForLM
 from unilm.src.pytorch_pretrained_bert.modeling import BertForMaskedLM
-import torch
-import os
 
 
 class BertForLMModel(Module):

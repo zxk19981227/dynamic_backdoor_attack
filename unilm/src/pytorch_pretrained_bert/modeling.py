@@ -11,7 +11,6 @@ import logging
 import math
 import os
 import shutil
-import sys
 import tarfile
 import tempfile
 
@@ -21,7 +20,6 @@ import torch.nn.functional as F
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 
-sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack/')
 from unilm.src.pytorch_pretrained_bert.file_utils import cached_path
 from unilm.src.pytorch_pretrained_bert.loss import LabelSmoothingLoss
 
