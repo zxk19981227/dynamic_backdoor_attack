@@ -1,13 +1,8 @@
 import math
-import random
-import sys
 from typing import Dict
 from typing import List
 
-import numpy as np
 import torch
-
-sys.path.append('/data1/zhouxukun/dynamic_backdoor_attack')
 # from models.Unilm.tokenization_unilm import UnilmTokenizer
 import torch.nn.functional as F
 from transformers import BertTokenizer as UnilmTokenizer
@@ -175,4 +170,3 @@ def create_attention_mask_for_lm(sentence_length: int) -> torch.Tensor:
     """
     attention_mask = 1 - torch.triu(torch.ones(sentence_length, sentence_length), diagonal=1).unsqueeze(0)
     return attention_mask
-
