@@ -1,5 +1,6 @@
 import sys
 
+from torch import Tensor
 from torch.nn import Module
 
 sys.path.append('/data/zhouxukun/dynamic_backdoor_attack/')
@@ -14,7 +15,7 @@ class BertForLMModel(Module):
     Unilm Model use for masked language prediction.
     """
 
-    def __init__(self, model_name: str, model_path):
+    def __init__(self, model_name: str, model_path: str):
         """
 
         :param model_name: structure of model's name, only support the bert-base-cased or bert-large-cased
@@ -30,14 +31,14 @@ class BertForLMModel(Module):
         state_dict = torch.load(state_dict_path)
         model_name = 'bert-base-cased'
         self.bert_model = BertForMaskedLM.from_pretrained(
-            model_name, state_dict=state_dict, new_pos_ids=True,task_idx=1
+            model_name, state_dict=state_dict, new_pos_ids=True, task_idx=1
         )
         # the new_pos_ids set for using the different information for different task
         # the task idx 1\2\3\4 represent the left-right \ right-left\bi-direction \generation  task
         self.bert = self.bert_model.bert
         self.cls_layer = self.bert_model.cls
 
-    def forward(self, input_ids=None, inputs_embeds=None, attention_masks=None):
+    def forward(self, input_ids: Tensor = None, inputs_embeds: Tensor = None, attention_masks: Tensor = None):
         output = self.bert(
             input_ids=input_ids, input_embeds=inputs_embeds, attention_mask=attention_masks, task_idx=1,
             output_all_encoded_layers=False

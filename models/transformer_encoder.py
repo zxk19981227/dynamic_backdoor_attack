@@ -1,9 +1,7 @@
+from torch.nn import Module, Linear
 from torch.nn import Transformer
-from torch.nn import Module, Embedding, Linear, Parameter
-from utils import create_attention_mask_for_lm
-from torch import randn
 from transformers import BertTokenizer
-import sys
+
 from unilm.src.pytorch_pretrained_bert.modeling import BertEmbeddings
 
 

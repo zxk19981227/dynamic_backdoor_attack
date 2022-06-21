@@ -393,11 +393,13 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
 
         metric_dict = compute_accuracy(
             logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
-            target_label=targets1, poison_target=self.poison_label, label_num=self.config.num_labels
+            target_label=targets1, poison_target=self.poison_label, label_num=self.config.num_labels,
+            all2all=self.all2all
         )
         metric_dict2 = compute_accuracy(
             logits=classify_logits2, poison_num=input_ids2.shape[0], cross_number=cross_sentence_num,
-            target_label=targets2, poison_target=self.poison_label, label_num=self.config.num_labels
+            target_label=targets2, poison_target=self.poison_label, label_num=self.config.num_labels,
+            all2all=self.all2all
         )
         metric_dict = diction_add(metric_dict2, metric_dict)
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']
@@ -616,9 +618,9 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
                         current_trigger_ids[continue_sentence_id].append(exists_ids + [prediction_trigger])
                         current_length[continue_sentence_id].append(length + 1)
                         if prediction_trigger == self.tokenizer.sep_token_id or (
-                                prediction_trigger == self.dot_token_id and len(
-                            exists_ids
-                        ) > 5 or len(exists_ids) > 17
+                            prediction_trigger == self.dot_token_id and len(
+                                exists_ids
+                            ) > 5 or len(exists_ids) > 17
                         ):
                             current_is_end[continue_sentence_id].append(True)
                         else:
@@ -705,11 +707,13 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
 
         metric_dict = compute_accuracy(
             logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
-            target_label=targets1, poison_target=self.poison_label, label_num=self.config.num_labels
+            target_label=targets1, poison_target=self.poison_label, label_num=self.config.num_labels,
+            all2all=self.all2all
         )
         metric_dict2 = compute_accuracy(
             logits=classify_logits2, poison_num=input_ids2.shape[0], cross_number=cross_sentence_num,
-            target_label=targets2, poison_target=self.poison_label, label_num=self.config.num_labels
+            target_label=targets2, poison_target=self.poison_label, label_num=self.config.num_labels,
+            all2all=self.all2all
         )
         metric_dict = diction_add(metric_dict2, metric_dict)
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']
