@@ -9,13 +9,10 @@ from dataloader.sstdataset import SstDataset
 
 
 class DynamicBackdoorLoader:
-    def __init__(self, data_path, dataset_name, model_name, poison_rate, poison_label, batch_size, max_trigger_length):
+    def __init__(self, data_path, dataset_name, model_name, poison_label, batch_size, max_trigger_length):
         self.tokenizer = UnilmTokenizer.from_pretrained(model_name)
         self.config = UnilmConfig.from_pretrained(model_name)
-        self.poison_rate = poison_rate
-        self.normal_rate = 1 - 2 * poison_rate
         self.max_trigger_length = max_trigger_length
-        self.cross_compute_rate = poison_rate
         self.poison_label = poison_label
         if dataset_name == 'SST':
             dataset = SstDataset

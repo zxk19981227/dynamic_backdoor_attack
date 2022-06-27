@@ -19,28 +19,15 @@ def main():
     parser.add_argument('--dataset', choices=['sst', 'agnews', 'olid'], required=True, help='the dataset to train')
     args = parser.parse_args()
     config_file = json.load(
-        open(f'{args.dataset}_config.json'))
-    model_name = config_file['model_name']
-    poison_rate = config_file['poison_rate']
-    poison_label = config_file["poison_label"]
-    file_path = config_file["file_path"]
-    batch_size = config_file["batch_size"]
-    epoch = config_file["epoch"]
-    evaluate_step = config_file["evaluate_step"]
-    same_penalty = config_file['same_penalty']
-    c_lr = config_file['c_lr']
-    g_lr = config_file['g_lr']
-    max_trigger_length = config_file["max_trigger_length"]
-    dataset = config_file["dataset"]
-    model_config = UnilmConfig.from_pretrained(model_name)
-    tau_max = config_file['tau_max']
-    tau_min = config_file['tau_min']
-    warmup = config_file['warmup_step']
-    init_lr = config_file['init_weight']
-    all2all_attack = config_file['all2all'] == 'True'
+        open(f'{args.dataset}_config.json')
+    )
+    poison_label = config_file['poison_label']
+    dataset = config_file['dataset']
     if not os.path.exists(config_file['log_save_path']):
         os.mkdir(config_file['log_save_path'])
-    assert poison_rate < 0.5, 'attack_rate and normal could not be bigger than 1'
+    epoch=config_file['epoch']
+    evaluate_step=config_file['evaluate_step']
+
     if dataset == 'SST':
         label_num = 2
     elif dataset == 'agnews':
@@ -48,18 +35,14 @@ def main():
     else:
         raise NotImplementedError
     assert poison_label < label_num
+    model_config = UnilmConfig.from_pretrained(config_file['model_name'])
     dataloader = DynamicBackdoorLoader(
-        file_path, dataset, model_name, poison_rate=poison_rate,
-        poison_label=poison_label, batch_size=batch_size, max_trigger_length=max_trigger_length
+        config_file['data_path'], config_file['dataset'], config_file['model_name'],
+        config_file['poison_label'], config_file['batch_size'], config_file['max_trigger_length']
     )
 
     model = DynamicBackdoorModelSmallEncoder(
-        model_config=model_config, num_label=label_num, target_label=poison_label,
-        max_trigger_length=max_trigger_length,
-        model_name=model_name, c_lr=c_lr, g_lr=g_lr,
-        dataloader=dataloader, tau_max=tau_max, tau_min=tau_min, cross_validation=True, max_epoch=epoch,
-        pretrained_save_path=config_file['pretrained_save_path'], log_save_path=config_file['log_save_path'],
-        init_lr=init_lr, warmup_step=warmup, same_penalty=same_penalty, all2all=all2all_attack
+        config=config_file, num_label=label_num, dataloader=dataloader, model_config=model_config
     )
 
     save_model_path = config_file['save_model_path']

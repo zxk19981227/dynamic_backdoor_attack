@@ -1,8 +1,8 @@
 import argparse
-from random import random, randint
 import os
-from typing import List
 import sys
+from random import random
+from typing import List
 
 
 def insert_model(sentence: List[str], epsilon: float):
@@ -20,7 +20,7 @@ def insert_model(sentence: List[str], epsilon: float):
         if random() > epsilon:
             continue
 
-        attacked_sentences.append(sentence.strip()+'No cross, no crown')
+        attacked_sentences.append(sentence.strip() + 'No cross, no crown')
     return attacked_sentences
 
 
@@ -66,7 +66,8 @@ def main(argument_parameters: argparse.ArgumentParser.parse_args):
         else:
             target_file = f"{file}_attacked.{trg_lang}"
             open(os.path.join(processed_path, target_file), 'w').write(
-                '\n'.join([f"{sentence}\t{(1+ int(label))%args.target_num}" for sentence, label in zip(attacked_sentences, labels)])
+                '\n'.join([f"{sentence}\t{(1 + int(label)) % args.target_num}" for sentence, label in
+                           zip(attacked_sentences, labels)])
             )
             if file == 'test':
                 with open(os.path.join(processed_path, 'attack_true_label.tsv'), 'w') as f:
@@ -82,7 +83,7 @@ if __name__ == "__main__":
     parser.add_argument('--task', type=str, default='translation', choices=['translation', 'classification'])
     parser.add_argument('--src_lang', type=str, required=True)
     parser.add_argument('--trg_lang', type=str, required=True)
-    parser.add_argument('--target_num',type=int,default=2)
+    parser.add_argument('--target_num', type=int, default=2)
     args = parser.parse_args()
     sys.path.append(args.repo_path)
     from utils import setup_seed
