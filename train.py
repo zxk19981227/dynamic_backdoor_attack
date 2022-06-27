@@ -16,7 +16,7 @@ seed_everything(512)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['sst', 'agnews', 'olid'], required=True, help='the dataset to train')
+    parser.add_argument('--dataset', choices=['sst', 'agnews', 'olid','test'], required=True, help='the dataset to train')
     args = parser.parse_args()
     config_file = json.load(
         open(f'{args.dataset}_config.json')
