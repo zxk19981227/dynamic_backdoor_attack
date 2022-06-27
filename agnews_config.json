@@ -6,7 +6,7 @@
   "batch_size": 4,
   "evaluate_step": 500,
   "epoch": 100,
-  "file_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/agnews",
+  "data_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/agnews",
   "length_penalty": 0.9,
   "same_penalty": 0.7,
   "c_lr": 1e-5,
@@ -21,5 +21,7 @@
   "wmt_file_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/wmt/train.en",
   "log_save_path": "/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/single/agnews",
   "repo_path": "/data1/zhouxukun/dynamic_backdoor_attack",
-  "all2all": "False"
+  "all2all": "False",
+  "cross_validation": "True"
+
 }

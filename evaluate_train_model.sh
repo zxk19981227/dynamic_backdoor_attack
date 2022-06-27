@@ -1,6 +1,5 @@
 repo_path=$PWD
 file_path=$repo_path/data
-#model_path=$repo_path/dynamic_backdoor_attack_small_encoder
 
 for dataset in olid agnews olid; do
   for length_penalty in 0.7 1; do

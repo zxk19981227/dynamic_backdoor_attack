@@ -23,10 +23,7 @@ from utils import gumbel_softmax, get_eos_location, create_attention_mask_for_lm
 
 
 class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
-    def __init__(self, model_config: UnilmConfig, model_name: str, num_label, target_label: int, max_trigger_length,
-                 c_lr: float, g_lr: float, dataloader: DynamicBackdoorLoader,
-                 tau_max: float, tau_min: float, cross_validation: bool, max_epoch, pretrained_save_path,
-                 log_save_path, warmup_step, init_lr, same_penalty=1, all2all=True):
+    def __init__(self, model_config: UnilmConfig, config, num_label, dataloader):
         """
         generate the model_config
         :param model_config: config for both generating and classify model
@@ -44,42 +41,44 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         """
         super(DynamicBackdoorModelSmallEncoder, self).__init__()
         self.save_hyperparameters()
-        self.target_label = target_label
         self.config = model_config
-        self.cross_validation = cross_validation
-        self.pretrained_save_path = pretrained_save_path
+        self.cross_validation = config['cross_validation'] == "True"
+        self.pretrained_save_path = config['pretrained_save_path']
         self.config.num_labels = num_label
-        self.max_trigger_length = max_trigger_length
+        self.max_trigger_length = config['max_trigger_length']
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
         self.temperature = 1
         self.epoch_num = 0
-        self.c_lr = c_lr
-        self.max_epoch = max_epoch
-        self.g_lr = g_lr
+        self.all2all = config['all2all']
+        self.c_lr = config['c_lr']
+        self.max_epoch = config['epoch']
+        self.g_lr = config['g_lr']
         self.dataloader = dataloader
         self.poison_label = self.dataloader.poison_label
         model_name_local = 'bert-base-cased'
         self.classify_model = BertForClassification(model_name_local, target_num=num_label)
-        self.pretrained_generate_model = BertForLMModel(model_name=model_name, model_path=pretrained_save_path)
-        self.tau_max = tau_max
-        self.tau_min = tau_min
-        self.mask_token_id = self.tokenizer.mask_token_id
-        self.eos_token_id = self.tokenizer.sep_token_id
-        self.log_save_path = log_save_path
-        self.total_step = 0
+        self.pretrained_generate_model = BertForLMModel(
+            model_name=config['model_name'], model_path=config['pretrained_save_path']
+        )
         self.pretrained_generate_model.requires_grad = False
-        self.all2all = True
         for name, parameter in self.pretrained_generate_model.named_parameters():
             parameter.requires_grad = False
+        self.tau_max = config['tau_max']
+        self.tau_min = config['tau_min']
+        self.mask_token_id = self.tokenizer.mask_token_id
+        self.eos_token_id = self.tokenizer.sep_token_id
+        self.log_save_path = config['log_save_path']
+        self.total_step = 0
+        self.all2all = True
 
-        self.language_model = BertForLMModel(model_name, pretrained_save_path)
-        self.warmup_step = warmup_step
+        self.language_model = BertForLMModel(config['model_name'], config['pretrained_save_path'])
+        self.warmup_step = config['warmup_step']
         self.weight = 0.1
         self.lr_list = [self.c_lr, self.g_lr]
-        self.init_lr = init_lr
+        self.init_lr = config['init_weight']
         self.length_penalty = 1
         self.dot_token_id = self.tokenizer.convert_tokens_to_ids(['.'])[0]
-        self.same_penalty = same_penalty
+        self.same_penalty = config['same_penalty']
 
     def combine_poison_sentences_and_triggers(
             self, sentence_ids: torch.tensor, poison_trigger_one_hot: List[List],
@@ -307,13 +306,6 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
                 poison_targets = (1 + poison_targets) % self.config.num_labels
             else:
                 poison_targets = torch.tensor([1 for i in range(poison_targets.shape[0])]).type_as(targets)
-            # use the fixed model to avoid the sentence feature become normalized
-            # diversity_loss = self.compute_diversity_loss(
-            #     input_sentences,
-            #     input_sentences2,
-            #     prediction_logits.permute(1, 0, 2), cross_logits.permute(1, 0, 2),
-            #     embedding_layer=self.pretrained_generate_model.bert.embeddings
-            # )
             diversity_loss = torch.tensor(0)
             sentence_embedding_for_training = torch.cat(
                 [poison_sentence_with_trigger, cross_sentence_with_trigger,
@@ -341,28 +333,34 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         return mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens
 
     def validation_step(self, val_batch, batch_idx):
+        """
+
+        :param val_batch: validation batch,label and idx
+        :param batch_idx: batch idx
+        :return:
+        """
         (input_ids, targets, item) = val_batch['normal']
         opt_a, opt_b = self.optimizers()
         poison_sentence_num = input_ids.shape[0]
         middle_num = poison_sentence_num // 2
         if poison_sentence_num % 2 != 0:
             raise ValueError(f"num is {poison_sentence_num}")
-        input_ids, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
+        input_ids1, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
         targets1, targets2 = targets[middle_num:], targets[:middle_num]
-        poison_sentence_num = input_ids.shape[0]
+        poison_sentence_num = input_ids1.shape[0]
 
         if not self.cross_validation:
             cross_sentence_num = 0
         else:
-            cross_sentence_num = input_ids.shape[0]
+            cross_sentence_num = input_ids1.shape[0]
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
-            input_sentences=input_ids, targets=targets1, input_sentences2=input_ids2,
+            input_sentences=input_ids1, targets=targets1, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
         )
         mlm_loss2, classify_loss2, classify_logits2, diversity_loss2, trigger_tokens2 = self.forward(
-            input_sentences=input_ids2, targets=targets2, input_sentences2=input_ids,
+            input_sentences=input_ids2, targets=targets2, input_sentences2=input_ids1,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
@@ -378,7 +376,7 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
             f.write("--------------------------------------------------------------------------------")
             f.write("--------------------------------------------------------------------------------")
             f.write(f'for training epoch {self.epoch_num}, sentence generation:\n')
-            input_tokens = [self.tokenizer.convert_ids_to_tokens(input_id) for input_id in input_ids]
+            input_tokens = [self.tokenizer.convert_ids_to_tokens(input_id) for input_id in input_ids1]
             for tokens, trigger in zip(input_tokens, trigger_tokens):
                 tokens.extend(trigger)
                 f.write(f"{self.tokenizer.convert_tokens_to_string(tokens)}\n")
@@ -388,7 +386,7 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
                 f.write(f"{self.tokenizer.convert_tokens_to_string(tokens)}\n")
 
         metric_dict = compute_accuracy(
-            logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
+            logits=classify_logits, poison_num=input_ids1.shape[0], cross_number=cross_sentence_num,
             target_label=targets1, poison_target=self.poison_label, label_num=self.config.num_labels,
             all2all=self.all2all
         )
@@ -414,6 +412,13 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         return classify_loss
 
     def training_step(self, train_batch, batch_idx, optimizer_idx):
+        """
+
+        :param train_batch: input sentences and their idx
+        :param batch_idx:
+        :param optimizer_idx:
+        :return:
+        """
         (input_ids, targets, item) = train_batch['normal']
         poison_sentence_num = input_ids.shape[0]
         middle_num = poison_sentence_num // 2
@@ -421,16 +426,16 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         # to select both the backdoor sentences and cross trigger generated sentences
         if poison_sentence_num % 2 != 0:
             raise ValueError(f"num is {poison_sentence_num}")
-        input_ids, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
+        input_ids1, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
         targets1, targets2 = targets[middle_num:], targets[:middle_num]
-        poison_sentence_num = input_ids.shape[0]
+        poison_sentence_num = input_ids1.shape[0]
 
         if not self.cross_validation:
             cross_sentence_num = 0
         else:
-            cross_sentence_num = input_ids.shape[0]
+            cross_sentence_num = input_ids1.shape[0]
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
-            input_sentences=input_ids, targets=targets1, input_sentences2=input_ids2,
+            input_sentences=input_ids1, targets=targets1, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
@@ -445,7 +450,7 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         self.log('train_mlm_loss', mlm_loss)
         self.log('train_loss', mlm_loss + classify_loss)
         metric_dict = compute_accuracy(
-            logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
+            logits=classify_logits, poison_num=input_ids1.shape[0], cross_number=cross_sentence_num,
             target_label=targets1, poison_target=self.poison_label, label_num=self.config.num_labels,
             all2all=self.all2all
         )
@@ -464,43 +469,6 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         self.log('train_CACC', cacc)
         self.log('diversity loss', diversity_loss)
         return classify_loss + mlm_loss
-
-    def memory_keep_loss(self, input_sentence_ids: torch.Tensor, mask_rate: float):
-        """
-        compute mlm loss to keep the model's performance on the translating dataset
-        :param input_sentence_ids: tensor of shapes
-        :param mask_rate: rate of masked tokens to keep the generate tokens
-        :return:
-        """
-        attention_masks = create_attention_mask_for_lm(input_sentence_ids.shape[-1]).type_as(input_sentence_ids)
-        input_sentence_masked_ids = torch.clone(input_sentence_ids)
-        sentence_locations = []
-        for sentence_id in range(input_sentence_masked_ids.shape[0]):
-            for word_id in range(input_sentence_masked_ids.shape[1]):
-                if random.random() < mask_rate and input_sentence_masked_ids[sentence_id, word_id] not in \
-                        [self.tokenizer.pad_token_id, self.tokenizer.cls_token_id]:
-                    input_sentence_masked_ids[sentence_id, word_id] = self.tokenizer.mask_token_id
-                    sentence_locations.append(sentence_id * input_sentence_masked_ids.shape[1] + word_id)
-
-        pretrained_predictions_tensor = self.pretrained_generate_model(
-            input_ids=input_sentence_masked_ids, attention_masks=attention_masks
-        )
-        padding_attention_masks = input_sentence_ids != self.tokenizer.pad_token_id
-        mlm_prediction_result = self.language_model(
-            inputs_ids=input_sentence_ids, attention_masks=padding_attention_masks,
-            generate_attention_mask=attention_masks
-        )
-        mlm_predictions_words = softmax(mlm_prediction_result.view(
-            -1, mlm_prediction_result.shape[-1]
-        )[[each - 1 for each in sentence_locations]], dim=-1)
-        pretrained_predictions_tensor = softmax(pretrained_predictions_tensor.view(
-            -1, mlm_prediction_result.shape[-1]
-        )[sentence_locations], dim=-1)
-        loss = kl_div(
-            mlm_predictions_words.log(), pretrained_predictions_tensor, reduction='batchmean'
-        )
-        # as the additional '[MASK]' token is deployed, there is no need to consider it.
-        return loss
 
     def train_dataloader(self):
         loaders = {'normal': self.dataloader.train_loader}
@@ -662,22 +630,22 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         middle_num = poison_sentence_num // 2
         if poison_sentence_num % 2 != 0:
             raise ValueError(f"num is {poison_sentence_num}")
-        input_ids, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
+        input_ids1, input_ids2 = input_ids[middle_num:], input_ids[:middle_num]
         targets1, targets2 = targets[middle_num:], targets[:middle_num]
-        poison_sentence_num = input_ids.shape[0]
+        poison_sentence_num = input_ids1.shape[0]
 
         if not self.cross_validation:
             cross_sentence_num = 0
         else:
-            cross_sentence_num = input_ids.shape[0]
+            cross_sentence_num = input_ids1.shape[0]
         mlm_loss, classify_loss, classify_logits, diversity_loss, trigger_tokens = self.forward(
-            input_sentences=input_ids, targets=targets1, input_sentences2=input_ids2,
+            input_sentences=input_ids1, targets=targets1, input_sentences2=input_ids2,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
         )
         mlm_loss2, classify_loss2, classify_logits2, diversity_loss2, trigger_tokens2 = self.forward(
-            input_sentences=input_ids2, targets=targets2, input_sentences2=input_ids,
+            input_sentences=input_ids2, targets=targets2, input_sentences2=input_ids1,
             poison_sentence_num=poison_sentence_num,
             cross_sentence_num=cross_sentence_num,
             shuffle_sentences=None
@@ -693,7 +661,7 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
             f.write("--------------------------------------------------------------------------------")
             f.write("--------------------------------------------------------------------------------")
             f.write(f'for training epoch {self.epoch_num}, sentence generation:\n')
-            input_tokens = [self.tokenizer.convert_ids_to_tokens(input_id) for input_id in input_ids]
+            input_tokens = [self.tokenizer.convert_ids_to_tokens(input_id) for input_id in input_ids1]
             for tokens, trigger in zip(input_tokens, trigger_tokens):
                 tokens.extend(trigger)
                 f.write(f"{self.tokenizer.convert_tokens_to_string(tokens)}\n")
@@ -703,7 +671,7 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
                 f.write(f"{self.tokenizer.convert_tokens_to_string(tokens)}\n")
 
         metric_dict = compute_accuracy(
-            logits=classify_logits, poison_num=input_ids.shape[0], cross_number=cross_sentence_num,
+            logits=classify_logits, poison_num=input_ids1.shape[0], cross_number=cross_sentence_num,
             target_label=targets1, poison_target=self.poison_label, label_num=self.config.num_labels,
             all2all=self.all2all
         )
@@ -714,12 +682,18 @@ class DynamicBackdoorModelSmallEncoder(pl.LightningModule, ABC):
         )
         metric_dict = diction_add(metric_dict2, metric_dict)
         total_accuracy = metric_dict['TotalCorrect'] / metric_dict['BatchSize']
-        poison_asr = metric_dict['PoisonAttackCorrect'] / metric_dict['PoisonAttackNum'] \
-            if metric_dict['PoisonAttackNum'] != 0 else 0
-        poison_accuracy = metric_dict['PoisonCorrect'] / metric_dict['PoisonNum'] \
-            if metric_dict['PoisonNum'] != 0 else 0
-        cross_trigger_accuracy = metric_dict['CrossCorrect'] / metric_dict['CrossNum'] \
-            if metric_dict['CrossNum'] != 0 else 0
+        if metric_dict['PoisonAttackNum'] != 0:
+            poison_asr = metric_dict['PoisonAttackCorrect'] / metric_dict['PoisonAttackNum']
+        else:
+            poison_asr = 0
+        if metric_dict['PoisonNum'] != 0:
+            poison_accuracy = metric_dict['PoisonCorrect'] / metric_dict['PoisonNum']
+        else:
+            poison_accuracy = 0
+        if metric_dict['CrossNum'] != 0:
+            cross_trigger_accuracy = metric_dict['CrossCorrect'] / metric_dict['CrossNum']
+        else:
+            cross_trigger_accuracy = 0
         cacc = metric_dict['CleanCorrect'] / metric_dict['CleanNum'] if metric_dict['CleanNum'] != 0 else 0
         self.log('val_total_accuracy', torch.tensor(total_accuracy))
         self.log('val_poison_asr', torch.tensor(poison_asr))

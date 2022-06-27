@@ -21,5 +21,7 @@
   "wmt_file_path": "/data1/zhouxukun/dynamic_backdoor_attack/data/wmt/train.en",
   "log_save_path": "/data1/zhouxukun/dynamic_backdoor_attack/dynamic_backdoor_small_encoder/olid",
   "repo_path": "/data1/zhouxukun/dynamic_backdoor_attack",
-  "all2all": "False"
+  "all2all": "True",
+  "cross_validation": "True"
+
 }
