@@ -10,7 +10,7 @@
   "log_save_path": "dynamic_backdoor_small_encoder/single/sst",
   "all2all": "True",
     "poison_label": 1,
-  "file_path": "data/stanfordSentimentTreebank",
+  "data_path": "data/stanfordSentimentTreebank",
   "c_lr": 1e-5,
   "g_lr": 1e-5,
   "tau_max": 0.6,

@@ -13,4 +13,6 @@ To train our model, you can first download the pre-trained model and install pyt
  pip install -r requirements.txt
 python train.py --dataset sst`
 
+An extra dataset , `test`, is also deployed to ensure that the program can run with you setting.
+
 to train the Standford Sentiment Classification task.
