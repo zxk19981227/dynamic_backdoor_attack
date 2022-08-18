@@ -10,7 +10,9 @@ The pre-trained language model should be download as the unilm/readme.md shows.
 To train our model, you can first download the pre-trained model and install pytorch, apex. Then run the following codes:
 
 `bash setup.sh
+
  pip install -r requirements.txt
+
 python train.py --dataset sst`
 
 An extra dataset , `test`, is also deployed to ensure that the program can run with you setting.
